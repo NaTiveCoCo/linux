@@ -35,6 +35,9 @@ enum sbi_ext_id {
 	SBI_EXT_DBCN = 0x4442434E,
 	SBI_EXT_STA = 0x535441,
 
+	/* NaCC system agent extensions*/
+	SBI_EXT_NACC = 0xdeadbeef,
+
 	/* Experimentals extensions must lie within this range */
 	SBI_EXT_EXPERIMENTAL_START = 0x08000000,
 	SBI_EXT_EXPERIMENTAL_END = 0x08FFFFFF,
@@ -52,6 +55,10 @@ enum sbi_ext_base_fid {
 	SBI_EXT_BASE_GET_MVENDORID,
 	SBI_EXT_BASE_GET_MARCHID,
 	SBI_EXT_BASE_GET_MIMPID,
+};
+
+enum sbi_ext_nacc_fid {
+	SBI_EXT_NACC_INVOKE = 0,
 };
 
 enum sbi_ext_time_fid {

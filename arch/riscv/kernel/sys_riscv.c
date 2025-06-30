@@ -8,6 +8,8 @@
 #include <linux/syscalls.h>
 #include <asm/cacheflush.h>
 
+#include <asm/sbi.h>
+
 static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 			   unsigned long prot, unsigned long flags,
 			   unsigned long fd, off_t offset,
@@ -66,6 +68,23 @@ SYSCALL_DEFINE3(riscv_flush_icache, uintptr_t, start, uintptr_t, end,
 	flush_icache_mm(current->mm, flags & SYS_RISCV_FLUSH_ICACHE_LOCAL);
 
 	return 0;
+}
+
+SYSCALL_DEFINE1(nacc_invoke, unsigned long, cid)
+{
+    printk(KERN_ERR "[Linux]: runc init has invoked the linux to handle the invokion process. \n");
+
+    printk(KERN_ERR "[Linux]: container id is %lu. \n", cid);
+
+    /*
+     * Invoke an SBI call to the OpenSBI
+     */
+	struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, 0, 0, 0, 0, 0);
+	if (ret.error) 
+		pr_err("SBI call SBI_EXT_NACC_INVOKE failed with error %d\n", ret.error);
+		return -1;
+	
+    return 0;
 }
 
 /* Not defined using SYSCALL_DEFINE0 to avoid error injection */

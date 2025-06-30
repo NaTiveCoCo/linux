@@ -40,3 +40,10 @@
 #define __NR_riscv_flush_icache (__NR_arch_specific_syscall + 15)
 #endif
 __SYSCALL(__NR_riscv_flush_icache, sys_riscv_flush_icache)
+
+#ifndef __NR_nacc_invoke
+#define __NR_nacc_invoke (__NR_riscv_flush_icache + 13)
+#endif
+
+__SYSCALL(__NR_nacc_invoke, sys_nacc_invoke)
+
