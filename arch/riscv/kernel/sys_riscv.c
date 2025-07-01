@@ -80,6 +80,7 @@ SYSCALL_DEFINE1(nacc_invoke, unsigned long, cid)
      * Invoke an SBI call to the OpenSBI
      */
 	struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, 0, 0, 0, 0, 0);
+	
 	if (ret.error) 
 		pr_err("SBI call SBI_EXT_NACC_INVOKE failed with error %d\n", ret.error);
 		return -1;

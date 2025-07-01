@@ -36,7 +36,7 @@ enum sbi_ext_id {
 	SBI_EXT_STA = 0x535441,
 
 	/* NaCC system agent extensions*/
-	SBI_EXT_NACC = 0xdeadbeef,
+	SBI_EXT_NACC = 0x4E414343,
 
 	/* Experimentals extensions must lie within this range */
 	SBI_EXT_EXPERIMENTAL_START = 0x08000000,
