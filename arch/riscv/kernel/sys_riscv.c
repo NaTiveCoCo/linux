@@ -10,6 +10,10 @@
 
 #include <asm/sbi.h>
 
+#include <linux/slab.h>
+#include <linux/gfp.h>
+#include <asm/page.h>
+
 static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 			   unsigned long prot, unsigned long flags,
 			   unsigned long fd, off_t offset,
@@ -74,17 +78,46 @@ SYSCALL_DEFINE1(nacc_invoke, unsigned long, cid)
 {
     printk(KERN_ERR "[Linux]: runc init has invoked the linux to handle the invokion process. \n");
 
-    printk(KERN_ERR "[Linux]: container id is %lu. \n", cid);
+    printk(KERN_ERR "[Linux]: container id is %lx. \n", cid);
 
     /*
-     * Invoke an SBI call to the OpenSBI
+     * Allocate an emptry page to fetch the PPN, and later free them manually.
      */
-	struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, 0, 0, 0, 0, 0);
+    unsigned long *tmp_page = kmalloc(PAGE_SIZE, GFP_KERNEL);
+    unsigned long pa = __pa(tmp_page);
+    memset(tmp_page, 0, PAGE_SIZE);
+    /*
+     * Invoke an SBI call to the OpenSBI.
+     */
+	struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, pa, 0, 0, 0, 0);
 	
-	if (ret.error) 
+	if (ret.error) {
 		pr_err("SBI call SBI_EXT_NACC_INVOKE failed with error %d\n", ret.error);
 		return -1;
-	
+	}
+
+    printk(KERN_ERR "[Linux]: You should see me?\n");
+    
+    printk(KERN_ERR "[Linux]: tmp_page is at 0x%lx, pa is 0x%lx, we try to access it.\n", (unsigned long)tmp_page, pa);
+    printk(KERN_ERR "[Linux]: tmp_page First 8 Bytes: %lx\n", *tmp_page);
+    
+
+    /*
+     * tmp_page will be filled with the unused PPN of the container.
+     * So we manually go over the tmp_page to free them.
+     */
+    for(unsigned long i = 0; i < PAGE_SIZE / sizeof(unsigned long); i++) {
+        unsigned long page_to_free = *(tmp_page + i);
+        if (page_to_free == 0) {
+            break;  // Stop on zero entry
+        }
+        printk(KERN_ERR "[Linux]: freeing page 0x%lx\n", page_to_free);
+        __free_page(phys_to_page(page_to_free));
+    }
+
+    kfree(tmp_page);
+
+    printk(KERN_ERR "[Linux]: GO BACK TO RUNC. \n");
     return 0;
 }
 
