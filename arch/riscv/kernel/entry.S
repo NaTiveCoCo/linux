@@ -427,7 +427,7 @@ SYM_FUNC_END(__switch_to)
 	.section ".rodata"
 	.align LGREG
 	/* Exception vector table */
-SYM_DATA_START_LOCAL(excp_vect_table)
+SYM_DATA_START(excp_vect_table)
 	RISCV_PTR do_trap_insn_misaligned
 	ALT_INSN_FAULT(RISCV_PTR do_trap_insn_fault)
 	RISCV_PTR do_trap_insn_illegal
