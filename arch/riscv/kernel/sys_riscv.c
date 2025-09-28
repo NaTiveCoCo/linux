@@ -84,6 +84,13 @@ SYSCALL_DEFINE3(riscv_flush_icache, uintptr_t, start, uintptr_t, end,
 SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start)
 {
     struct pt_regs *regs = task_pt_regs(current);
+    
+    /*
+     * Mark the current process as nacc process.
+     * Else the linux don't know how to handle it.
+     */
+    current->thread.nacc_flag = 1; 
+
     unsigned long current_gp;
 
     printk(KERN_ERR "[Linux]: runc init has invoked the linux to handle the invocation process. \n");
@@ -142,6 +149,7 @@ SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start
     /*
      * The first page will be used to transfer pt_regs info, while the second will transfer other info.
      */
+    
     
     struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, agent_virt_start, (unsigned long) regs, (unsigned long) do_irq, (unsigned long) excp_vect_table, current_gp);
 

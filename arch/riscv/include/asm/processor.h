@@ -101,6 +101,10 @@ struct thread_struct {
 	unsigned long sp;	/* Kernel mode stack */
 	unsigned long s[12];	/* s[0]: frame pointer */
 	struct __riscv_d_ext_state fstate;
+
+    /* Nacc process flag, nacc process will be handled differently */
+    unsigned long nacc_flag;
+
 	unsigned long bad_cause;
 	u32 riscv_v_flags;
 	u32 vstate_ctrl;

@@ -385,9 +385,15 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 	if (IS_ENABLED(CONFIG_IRQ_STACKS) && on_thread_stack())
 		call_on_irq_stack(regs, handle_riscv_irq);
 	else
-		handle_riscv_irq(regs);
+	    handle_riscv_irq(regs);
 
 	irqentry_exit(regs, state);
+
+    if (current->thread.nacc_flag) {
+        printk(KERN_ERR "[Linux]: Back to do_irq in kernel. With regs: %lx\n", (unsigned long)regs);
+        // 0001000    00010 00000 000 00000 0001011
+        __asm__ volatile (".word 0x1020000b" ::: "memory");
+    }
 }
 
 #ifdef CONFIG_GENERIC_BUG
