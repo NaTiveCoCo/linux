@@ -102,4 +102,6 @@ asmlinkage long sys_riscv_hwprobe(struct riscv_hwprobe *, size_t, size_t,
 
 asmlinkage long sys_nacc_invoke(unsigned long cid);
 
+asmlinkage long sys_nacc_loop_test(unsigned long cid);
+
 #endif	/* _ASM_RISCV_SYSCALL_H */

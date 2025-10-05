@@ -352,6 +352,11 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		irqentry_nmi_exit(regs, state);
 	}
 
+    if (current->thread.nacc_flag) {
+        printk(KERN_ERR "[Linux]: Back to 'do_trap_ecall_u' in kernel. With regs: %lx\n", (unsigned long)regs);
+        // 0001000    00010 00000 000 00000 0001011
+        __asm__ volatile (".word 0x1020000b" ::: "memory");
+    }
 }
 
 #ifdef CONFIG_MMU
@@ -390,8 +395,11 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 	irqentry_exit(regs, state);
 
     if (current->thread.nacc_flag) {
-        printk(KERN_ERR "[Linux]: Back to do_irq in kernel. With regs: %lx\n", (unsigned long)regs);
-        // 0001000    00010 00000 000 00000 0001011
+        printk(KERN_ERR "[Linux]: Back to 'do_irq' in kernel. With regs: %lx\n", (unsigned long)regs);
+		printk(KERN_ERR "[Linux]: regs->sstatus: %lx\n", regs->status);
+		// 0001000    00010 00000 000 00000 0001011
+		csr_write(CSR_NACC_SSTATUS, regs->status);
+
         __asm__ volatile (".word 0x1020000b" ::: "memory");
     }
 }

@@ -163,6 +163,13 @@ SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start
 	return 0;
 }
 
+asmlinkage long nacc_loop_test(const struct pt_regs *__unused)
+{
+    printk(KERN_ERR "[Linux] syscall loop successful\n");
+
+    return 0;
+}
+
 /* Not defined using SYSCALL_DEFINE0 to avoid error injection */
 asmlinkage long __riscv_sys_ni_syscall(const struct pt_regs *__unused)
 {
