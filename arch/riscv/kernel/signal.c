@@ -401,6 +401,9 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 
 void arch_do_signal_or_restart(struct pt_regs *regs)
 {
+	if (current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: Entering 'arch_do_signal_or_restart' in kernel. With regs: %lx\n", (unsigned long)regs);
+	}
 	unsigned long continue_addr = 0, restart_addr = 0;
 	int retval = 0;
 	struct ksignal ksig;

@@ -42,11 +42,17 @@
 __SYSCALL(__NR_riscv_flush_icache, sys_riscv_flush_icache)
 
 #ifndef __NR_nacc_invoke
-#define __NR_nacc_invoke (__NR_riscv_flush_icache + 13)
+#define __NR_nacc_invoke (__NR_arch_specific_syscall + 13)
 
 #ifndef __NR_nacc_loop_test
-#define __NR_nacc_loop_test  (__NR_riscv_flush_icache + 14)
+#define __NR_nacc_loop_test  (__NR_arch_specific_syscall + 12)
 #endif
 
+#ifndef __NR_nacc_transfer_ptp
+#define __NR_nacc_transfer_ptp (__NR_arch_specific_syscall + 11)
+#endif 
+
 __SYSCALL(__NR_nacc_invoke, sys_nacc_invoke)
+__SYSCALL(__NR_nacc_loop_test, sys_nacc_loop_test)
+__SYSCALL(__NR_nacc_transfer_ptp, sys_nacc_transfer_ptp)
 

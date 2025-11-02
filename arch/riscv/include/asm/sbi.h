@@ -59,6 +59,7 @@ enum sbi_ext_base_fid {
 
 enum sbi_ext_nacc_fid {
 	SBI_EXT_NACC_INVOKE = 0,
+    SBI_EXT_NACC_TRANSFER_PTP = 3,
 };
 
 enum sbi_ext_time_fid {

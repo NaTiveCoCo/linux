@@ -16,10 +16,36 @@
 
 #include <asm/io.h>
 
+#define NACC_BASE_MAPPINGS 0x17ff00000
+#define NACC_MAPPINGS_SIZE 0x100000
+
+extern unsigned long nacc_mappings_virt;
+
 extern char do_irq[];
 extern char excp_vect_table[];
 
 extern unsigned long __global_pointer$;
+
+/**
+ * Page Frame Number (PFN) mapping structure.
+ * We are using Sv39, and the maximum memory is no more than 16 GB, so we can use 32-bit PFN.
+ */
+typedef struct pfn_mapping {
+    uint32_t old_pfn;
+    uint32_t new_pfn;
+} pfn_mapping_t;
+
+/**
+ * Therefore the mapping is done within one Page.
+ * It will be used multiple times during user memory Page Table Pages transfering process.
+ */
+typedef struct transfer_result {
+    pfn_mapping_t mappings[511];
+    uintptr_t count;
+} transfer_result_t;
+
+unsigned long transfer_result;
+
 
 static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 			   unsigned long prot, unsigned long flags,
@@ -89,7 +115,7 @@ SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start
      * Mark the current process as nacc process.
      * Else the linux don't know how to handle it.
      */
-    current->thread.nacc_flag = 1; 
+    // current->thread.nacc_flag = 1; 
 
     unsigned long current_gp;
 
@@ -163,11 +189,31 @@ SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start
 	return 0;
 }
 
-asmlinkage long nacc_loop_test(const struct pt_regs *__unused)
+SYSCALL_DEFINE0(nacc_loop_test)
 {
     printk(KERN_ERR "[Linux] syscall loop successful\n");
 
     return 0;
+}
+
+SYSCALL_DEFINE0(nacc_transfer_ptp)
+{
+    /* 
+     * One Entry contains <old_pfn, new_pfn>, which is the size of unsigned long 
+     * While the whole size of the transfer_result won't exceed one page size.
+     */
+    struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_TRANSFER_PTP, 0, 0, 0, 0, 0, 0);
+
+    if (ret.error) {
+        pr_err("[Linux]: SBI call SBI_EXT_NACC_TRANSFER_PTP failed with error %lx\n", ret.error);
+        return -1;
+    }
+
+    printk(KERN_ERR "[Linux]: Successfully transfered Page Table Page mappings from SBI to Linux. \n");
+    printk(KERN_ERR "[Linux]: Checks whether virt address %lx can be used? \n", nacc_mappings_virt);
+
+    printk(KERN_ERR "[Linux]: Exit soon. \n");
+    return ret.value;
 }
 
 /* Not defined using SYSCALL_DEFINE0 to avoid error injection */
