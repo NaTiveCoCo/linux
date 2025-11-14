@@ -90,8 +90,6 @@ void __weak arch_do_signal_or_restart(struct pt_regs *regs) { }
 __always_inline unsigned long exit_to_user_mode_loop(struct pt_regs *regs,
 						     unsigned long ti_work)
 {
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering 'exit_to_user_mode_loop' in kernel. With regs: %lx\n", (unsigned long)regs);
 	/*
 	 * Before returning to user space ensure that all pending work
 	 * items have been completed.
@@ -204,8 +202,6 @@ static void syscall_exit_to_user_mode_prepare(struct pt_regs *regs)
 
 static __always_inline void __syscall_exit_to_user_mode_work(struct pt_regs *regs)
 {
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering '__syscall_exit_to_user_mode_work' in kernel. With regs: %lx\n", (unsigned long)regs);
 	syscall_exit_to_user_mode_prepare(regs);
 	local_irq_disable_exit_to_user();
 	exit_to_user_mode_prepare(regs);
@@ -218,16 +214,10 @@ void syscall_exit_to_user_mode_work(struct pt_regs *regs)
 
 __visible noinstr void syscall_exit_to_user_mode(struct pt_regs *regs)
 {
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering 'syscall_exit_to_user_mode' in kernel. With regs->epc: %lx\n", (unsigned long)regs->epc);
 	instrumentation_begin();
 	__syscall_exit_to_user_mode_work(regs);
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering '__syscall_exit_to_user_mode_work' in kernel. With regs->epc: %lx\n", (unsigned long)regs->epc);
 	instrumentation_end();
 	exit_to_user_mode();
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering 'exit_to_user_mode' in kernel. With regs->epc: %lx\n", (unsigned long)regs->epc);
 }
 
 noinstr void irqentry_enter_from_user_mode(struct pt_regs *regs)

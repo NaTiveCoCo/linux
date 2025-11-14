@@ -10,8 +10,6 @@
 static inline void arch_exit_to_user_mode_prepare(struct pt_regs *regs,
 						  unsigned long ti_work)
 {
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering 'arch_exit_to_user_mode_prepare' in kernel. With regs: %lx\n", (unsigned long)regs);
 	if (ti_work & _TIF_RISCV_V_DEFER_RESTORE) {
 		clear_thread_flag(TIF_RISCV_V_DEFER_RESTORE);
 		/*

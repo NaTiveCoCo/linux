@@ -2856,6 +2856,12 @@ static inline struct ptdesc *virt_to_ptdesc(const void *x)
 	return page_ptdesc(virt_to_page(x));
 }
 
+static inline struct ptdesc *virt_to_ptdesc_nacc(const void *x)
+{
+
+	return page_ptdesc(virt_to_page_nacc(x));
+}
+
 static inline void *ptdesc_to_virt(const struct ptdesc *pt)
 {
 	return page_to_virt(ptdesc_page(pt));
@@ -2938,6 +2944,13 @@ static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
 }
 
+static inline spinlock_t *pte_lockptr_nacc(struct mm_struct *mm, pmd_t *pmd)
+{
+    struct ptdesc* desc = page_ptdesc(pmd_page_nacc(*pmd));
+    // printk(KERN_ERR "desc: %lx pmd: %lx *pmd pfn: %lx *pmd: %lx\n", (unsigned long)desc, (unsigned long)pmd, __page_val_to_pfn(pmd_val(*pmd)), (unsigned long)(pmd_val(*pmd)));
+    return ptlock_ptr(desc);
+}
+
 static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	BUILD_BUG_ON(IS_ENABLED(CONFIG_HIGHPTE));
@@ -2999,6 +3012,9 @@ static inline void pagetable_pte_dtor(struct ptdesc *ptdesc)
 }
 
 pte_t *__pte_offset_map(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp);
+
+pte_t *__pte_offset_map_nacc(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp);
+
 static inline pte_t *pte_offset_map(pmd_t *pmd, unsigned long addr)
 {
 	return __pte_offset_map(pmd, addr, NULL);

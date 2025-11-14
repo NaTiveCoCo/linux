@@ -202,6 +202,7 @@ SYSCALL_DEFINE0(nacc_transfer_ptp)
      * One Entry contains <old_pfn, new_pfn>, which is the size of unsigned long 
      * While the whole size of the transfer_result won't exceed one page size.
      */
+    current->thread.nacc_flag = 1;
     struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_TRANSFER_PTP, 0, 0, 0, 0, 0, 0);
 
     if (ret.error) {

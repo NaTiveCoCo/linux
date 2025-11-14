@@ -50,6 +50,10 @@
 #define pmd_pgtable(pmd) pmd_page(pmd)
 #endif
 
+#ifdef CONFIG_RISCV
+#define pmd_pgtable_nacc(pmd) pmd_page_nacc(pmd);
+#endif
+
 #define pmd_folio(pmd) page_folio(pmd_page(pmd))
 
 /*
@@ -106,6 +110,14 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 	rcu_read_unlock();	\
 } while (0)
 #else
+
+#ifdef CONFIG_RISCV
+static inline pte_t* __pte_map_nacc(pmd_t *pmd, unsigned long address)
+{
+	return (pte_t *) ((unsigned long) pfn_to_virt(pmd_page_nacc_mappings(*pmd))) + pte_index(address);
+}
+#endif
+
 static inline pte_t *__pte_map(pmd_t *pmd, unsigned long address)
 {
 	return pte_offset_kernel(pmd, address);
@@ -122,6 +134,11 @@ void pte_free_defer(struct mm_struct *mm, pgtable_t pgtable);
 #ifndef pmd_offset
 static inline pmd_t *pmd_offset(pud_t *pud, unsigned long address)
 {
+// #ifdef CONFIG_RISCV
+// 	if(current->thread.nacc_flag){
+// 		return (pmd_t *)pud_page_nacc(*pud) + pmd_index(address);
+// 	}
+// #endif
 	return pud_pgtable(*pud) + pmd_index(address);
 }
 #define pmd_offset pmd_offset

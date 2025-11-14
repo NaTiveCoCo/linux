@@ -189,12 +189,19 @@ void mm_trace_rss_stat(struct mm_struct *mm, int member)
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
-	pgtable_t token = pmd_pgtable(*pmd);
-	pmd_clear(pmd);
+	pgtable_t token;
+	if(current->thread.nacc_flag){
+		token = pmd_pgtable_nacc(*pmd);
+		pmd_clear_nacc(pmd);
+		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
+	} else {
+		token = pmd_pgtable(*pmd);
+		pmd_clear(pmd);
+	}
 	pte_free_tlb(tlb, token, addr);
 	mm_dec_nr_ptes(tlb->mm);
 }
-
+ 
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 				unsigned long addr, unsigned long end,
 				unsigned long floor, unsigned long ceiling)
@@ -204,14 +211,23 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	unsigned long start;
 
 	start = addr;
+	// change the pmd here, make sure we are leading to the old pfn?
+	// but should not interfere with the unmap_exit function we've used before.
 	pmd = pmd_offset(pud, addr);
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: before free pte range\n");
+	}
 	do {
 		next = pmd_addr_end(addr, end);
 		if (pmd_none_or_clear_bad(pmd))
 			continue;
+		// TODO: single swift change for pmd: new_pfn => old_pfn
 		free_pte_range(tlb, pmd, addr);
 	} while (pmd++, addr = next, addr != end);
 
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: after free pte range\n");
+	}
 	start &= PUD_MASK;
 	if (start < floor)
 		return;
@@ -225,8 +241,14 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 
 	pmd = pmd_offset(pud, start);
 	pud_clear(pud);
+    if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: after pud_clear\n");
+	}
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
+    if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
+	}
 }
 
 static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
@@ -239,13 +261,18 @@ static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
 
 	start = addr;
 	pud = pud_offset(p4d, addr);
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: before free pmd range\n");
+	}
 	do {
 		next = pud_addr_end(addr, end);
 		if (pud_none_or_clear_bad(pud))
 			continue;
 		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
 	} while (pud++, addr = next, addr != end);
-
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: after free pmd range\n");
+	}
 	start &= P4D_MASK;
 	if (start < floor)
 		return;
@@ -273,6 +300,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 
 	start = addr;
 	p4d = p4d_offset(pgd, addr);
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: before free pud_range\n");
+	}
 	do {
 		next = p4d_addr_end(addr, end);
 		if (p4d_none_or_clear_bad(p4d))
@@ -280,6 +310,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		free_pud_range(tlb, p4d, addr, next, floor, ceiling);
 	} while (p4d++, addr = next, addr != end);
 
+	if(current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: After free pud_range\n");
+	}
 	start &= PGDIR_MASK;
 	if (start < floor)
 		return;
@@ -1492,6 +1525,9 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 	struct mm_struct *mm = tlb->mm;
 	bool delay_rmap = false;
 
+	if(current->thread.nacc_flag) {
+		// printk(KERN_ERR "zap_present_folio_ptes: pte_addr: 0x%lx pte: 0x%lx\n", (unsigned long)pte, pte_val(*pte));
+	}
 	if (!folio_test_anon(folio)) {
 		ptent = get_and_clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
 		if (pte_dirty(ptent)) {
@@ -1540,6 +1576,11 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 		struct zap_details *details, int *rss, bool *force_flush,
 		bool *force_break)
 {
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_present_ptes: before vm_normal_page\n");
+	// 	printk(KERN_ERR "  pte_addr: %lx pte: %lx pfn: %lx ptent: %lx\n", (unsigned long) pte, pte_val(*pte), __page_val_to_pfn(pte_val(*pte)), pte_val(ptent));
+	// 	printk(KERN_ERR "  max_nr: %d addr: %lx\n", max_nr, addr);
+	// }
 	const fpb_t fpb_flags = FPB_IGNORE_DIRTY | FPB_IGNORE_SOFT_DIRTY;
 	struct mm_struct *mm = tlb->mm;
 	struct folio *folio;
@@ -1558,7 +1599,9 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 		ksm_might_unmap_zero_page(mm, ptent);
 		return 1;
 	}
-
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_present_ptes: vm_normal_page page: %lx\n", page_to_pfn(page));
+	// }
 	folio = page_folio(page);
 	if (unlikely(!should_zap_folio(details, folio)))
 		return 1;
@@ -1576,8 +1619,15 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 				       force_break);
 		return nr;
 	}
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_present_ptes: before zap_present_folio_ptes\n");
+	// }
+
 	zap_present_folio_ptes(tlb, vma, folio, page, pte, ptent, 1, addr,
 			       details, rss, force_flush, force_break);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_present_ptes: done\n");
+	// }
 	return 1;
 }
 
@@ -1598,6 +1648,10 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	tlb_change_page_size(tlb, PAGE_SIZE);
 	init_rss_vec(rss);
 	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_pte_range:\n");
+	// 	printk(KERN_ERR "pmd pfn: %lx pte pfn: %lx\n", __page_val_to_pfn(pmd_val(*pmd)), __page_val_to_pfn(pte_val(*pte)));
+	// }
 	if (!pte)
 		return addr;
 
@@ -1711,6 +1765,10 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	pmd = pmd_offset(pud, addr);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_pmd_range: Before zap_pte_range\n");
+	// 	printk(KERN_ERR "*pud pfn: %lx *pmd pfn: %lx pmd pointer: %lx\n", __page_val_to_pfn(pud_val(*pud)), __page_val_to_pfn(pmd_val(*pmd)), (unsigned long)pmd);
+	// }
 	do {
 		next = pmd_addr_end(addr, end);
 		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
@@ -1753,6 +1811,11 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	pud = pud_offset(p4d, addr);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_pud_range: Before zap_pmd_range\n");
+	// 	printk(KERN_ERR "p4d pfn: %lx pud pfn: %lx\n", __page_val_to_pfn(p4d_val(*p4d)), __page_val_to_pfn(pud_val(*pud)));
+	// }
+
 	do {
 		next = pud_addr_end(addr, end);
 		if (pud_trans_huge(*pud) || pud_devmap(*pud)) {
@@ -1782,6 +1845,10 @@ static inline unsigned long zap_p4d_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	p4d = p4d_offset(pgd, addr);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "zap_p4d_range: Before zap_pud_range\n");
+	// 	printk(KERN_ERR "pgd pfn: %lx p4d pfn: %lx\n", __page_val_to_pfn(pgd_val(*pgd)), __page_val_to_pfn(p4d_val(*p4d)));
+	// }
 	do {
 		next = p4d_addr_end(addr, end);
 		if (p4d_none_or_clear_bad(p4d))
@@ -1803,6 +1870,10 @@ void unmap_page_range(struct mmu_gather *tlb,
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
+	// if(current->thread.nacc_flag) {
+	// 	printk(KERN_ERR "unmap_page_range: Before zap_p4d_range\n");
+	// 	printk(KERN_ERR "pgd pfn: %lx addr: %lx\n", __page_val_to_pfn(pgd_val(*pgd)), addr);
+	// }
 	do {
 		next = pgd_addr_end(addr, end);
 		if (pgd_none_or_clear_bad(pgd))

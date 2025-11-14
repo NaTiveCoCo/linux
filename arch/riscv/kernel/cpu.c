@@ -21,7 +21,7 @@
 #define NACC_BASE_MAPPINGS 0x17ff00000
 #define NACC_MAPPINGS_SIZE 0x100000
 unsigned long nacc_mappings_virt = 0;
-
+EXPORT_SYMBOL(nacc_mappings_virt);
 bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
 {
 	return phys_id == cpuid_to_hartid_map(cpu);

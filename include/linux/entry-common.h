@@ -316,8 +316,6 @@ unsigned long exit_to_user_mode_loop(struct pt_regs *regs,
  */
 static __always_inline void exit_to_user_mode_prepare(struct pt_regs *regs)
 {
-	if (current->thread.nacc_flag)
-		printk(KERN_ERR "[Linux]: Entering 'exit_to_user_mode_prepare' in kernel. With regs: %lx\n", (unsigned long)regs);
 	unsigned long ti_work;
 
 	lockdep_assert_irqs_disabled();
