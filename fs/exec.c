@@ -73,6 +73,10 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
+
 #include <trace/events/task.h>
 #include "internal.h"
 
@@ -1776,6 +1780,9 @@ static int search_binary_handler(struct linux_binprm *bprm)
 /* binfmt handlers will call back into begin_new_exec() on success. */
 static int exec_binprm(struct linux_binprm *bprm)
 {
+    if(current->thread.nacc_flag == 2) {
+        printk(KERN_ERR "nacc: exec_binprm called when nacc_flag is 2\n");
+    }
 	pid_t old_pid, old_vpid;
 	int ret, depth;
 
@@ -1847,14 +1854,19 @@ static int bprm_execve(struct linux_binprm *bprm)
 		goto out;
 
 	sched_mm_cid_after_execve(current);
-	/* execve succeeded */
+
 	current->fs->in_exec = 0;
 	current->in_execve = 0;
 	rseq_execve(current);
 	user_events_execve(current);
 	acct_update_integrals(current);
 	task_numa_free(current, false);
-	return retval;
+#ifdef CONFIG_RISCV
+    if(current->thread.nacc_flag == NACC_PREPARE) {
+        nacc_invoke();
+    }
+#endif
+    return retval;
 
 out:
 	/*

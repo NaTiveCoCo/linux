@@ -32,6 +32,10 @@
 #include <linux/memremap.h>
 #include <linux/slab.h>
 
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
@@ -2858,7 +2862,10 @@ static inline struct ptdesc *virt_to_ptdesc(const void *x)
 
 static inline struct ptdesc *virt_to_ptdesc_nacc(const void *x)
 {
-
+    unsigned long old_pfn = virt_to_pfn(x);
+    if(old_pfn >= NACC_PTP_PFN_BASE && old_pfn < NACC_PTP_PFN_END) {
+        add_to_reclaim_list(old_pfn);
+    }
 	return page_ptdesc(virt_to_page_nacc(x));
 }
 

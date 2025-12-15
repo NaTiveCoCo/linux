@@ -25,13 +25,8 @@
 static void die_kernel_fault(const char *msg, unsigned long addr,
 		struct pt_regs *regs)
 {
-    if (current->thread.nacc_flag)
-        printk(KERN_ERR "[Linux]: 'die_kernel_fault' entry. msg: %s, addr: %lx\n", msg, addr);
-	bust_spinlocks(1);
+    bust_spinlocks(1);
 
-    if (current->thread.nacc_flag)
-        printk(KERN_ERR "[Linux]: 'die_kernel_fault' after bust_spinlocks. msg: %s, addr: %lx\n", msg, addr);
-	
 
 	pr_alert("Unable to handle kernel %s at virtual address " REG_FMT "\n", msg,
 		addr);
@@ -98,22 +93,14 @@ bad_area_nosemaphore(struct pt_regs *regs, int code, unsigned long addr)
 	 * Something tried to access memory that isn't in our memory map.
 	 * Fix it, but check if it's kernel or user first.
 	 */
-    if (current->thread.nacc_flag) {
-        printk(KERN_ERR "[Linux]: 'bad_area_nosemaphore' entry. addr: %lx, code: %d\n", addr, code);
-    }
-
+    
 	/* User mode accesses just cause a SIGSEGV */
 	if (user_mode(regs)) {
-        if (current->thread.nacc_flag) 
-            printk(KERN_ERR "[Linux]: 'bad_area_nosemaphore' do_trap. \n");
     
 		do_trap(regs, SIGSEGV, code, addr);
 		return;
 	}
 
-    if (current->thread.nacc_flag) 
-        printk(KERN_ERR "[Linux]: 'bad_area_nosemaphore' no_context \n");
-    
 	no_context(regs, addr);
 }
 
@@ -238,11 +225,6 @@ static inline bool access_error(unsigned long cause, struct vm_area_struct *vma)
  */
 void handle_page_fault(struct pt_regs *regs)
 {
-    if (current->thread.nacc_flag) {
-        printk(KERN_ERR "[Linux]: 'handle_page_fault' pt_regs details:\n");
-        printk(KERN_ERR "[Linux]: 'handle_page_fault' regs: 0x%lx\n", (unsigned long)regs);
-    }
-
 	struct task_struct *tsk;
 	struct vm_area_struct *vma;
 	struct mm_struct *mm;
@@ -272,9 +254,7 @@ void handle_page_fault(struct pt_regs *regs)
 	if ((!IS_ENABLED(CONFIG_MMU) || !IS_ENABLED(CONFIG_64BIT)) &&
 	    unlikely(addr >= VMALLOC_START && addr < VMALLOC_END)) {
 		vmalloc_fault(regs, code, addr);
-        if (current->thread.nacc_flag)
-            printk(KERN_ERR "[Linux]: Back to 'handle_page_fault' in kernel. First Entry.");
-		return;
+        return;
 	}
 
 	/* Enable interrupts if they were enabled in the parent context. */
@@ -287,9 +267,7 @@ void handle_page_fault(struct pt_regs *regs)
 	 */
 	if (unlikely(faulthandler_disabled() || !mm)) {
 		tsk->thread.bad_cause = cause;
-        if (current->thread.nacc_flag)
-            printk(KERN_ERR "[Linux]: Back to 'handle_page_fault' in kernel. 'no_context'.\n");
-		no_context(regs, addr);
+        no_context(regs, addr);
 		return;
 	}
 
@@ -299,9 +277,7 @@ void handle_page_fault(struct pt_regs *regs)
 	if (!user_mode(regs) && addr < TASK_SIZE && unlikely(!(regs->status & SR_SUM))) {
 		if (fixup_exception(regs))
 			return;
-        if (current->thread.nacc_flag)
-            printk(KERN_ERR "[Linux]: Back to 'handle_page_fault' in kernel. 'die_kernel_fault' .\n");
-		die_kernel_fault("access to user memory without uaccess routines", addr, regs);
+        die_kernel_fault("access to user memory without uaccess routines", addr, regs);
 	}
 
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, addr);
@@ -314,9 +290,7 @@ void handle_page_fault(struct pt_regs *regs)
 		goto lock_mmap;
 
 	vma = lock_vma_under_rcu(mm, addr);
-    if (current->thread.nacc_flag)
-        printk(KERN_ERR "[Linux]: 'handle_page_fault' vma details: %lx\n", (unsigned long)vma);
-	if (!vma)
+    if (!vma)
 		goto lock_mmap;
 
 	if (unlikely(access_error(cause, vma))) {
@@ -351,14 +325,8 @@ retry:
 	    printk(KERN_ERR "[Linux]: 'handle_page_fault' retry entry.\n");
 
     vma = lock_mm_and_find_vma(mm, addr, regs);
-    
-    if (current->thread.nacc_flag)
-	    printk(KERN_ERR "[Linux]: 'handle_page_fault' vma %lx.\n", (unsigned long)vma);
 
 	if (unlikely(!vma)) {
-        if (current->thread.nacc_flag)
-	        printk(KERN_ERR "[Linux]: 'handle_page_fault' vma is NULL.\n");
-
         tsk->thread.bad_cause = cause;
 		bad_area_nosemaphore(regs, code, addr);
 		return;

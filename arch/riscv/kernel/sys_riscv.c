@@ -19,32 +19,12 @@
 #define NACC_BASE_MAPPINGS 0x17ff00000
 #define NACC_MAPPINGS_SIZE 0x100000
 
+#define NACC_AGENT_MEM_SIZE        0x20000000
+
 extern unsigned long nacc_mappings_virt;
 
 extern char do_irq[];
 extern char excp_vect_table[];
-
-extern unsigned long __global_pointer$;
-
-/**
- * Page Frame Number (PFN) mapping structure.
- * We are using Sv39, and the maximum memory is no more than 16 GB, so we can use 32-bit PFN.
- */
-typedef struct pfn_mapping {
-    uint32_t old_pfn;
-    uint32_t new_pfn;
-} pfn_mapping_t;
-
-/**
- * Therefore the mapping is done within one Page.
- * It will be used multiple times during user memory Page Table Pages transfering process.
- */
-typedef struct transfer_result {
-    pfn_mapping_t mappings[511];
-    uintptr_t count;
-} transfer_result_t;
-
-unsigned long transfer_result;
 
 
 static long riscv_sys_mmap(unsigned long addr, unsigned long len,
@@ -107,114 +87,51 @@ SYSCALL_DEFINE3(riscv_flush_icache, uintptr_t, start, uintptr_t, end,
 	return 0;
 }
 
-SYSCALL_DEFINE2(nacc_invoke, unsigned long, cid, unsigned long, agent_virt_start)
+void nacc_invoke(void)
 {
+    unsigned long pid = current->pid;
+    unsigned long current_gp = 0;
+    unsigned long virt_agent = 0;
     struct pt_regs *regs = task_pt_regs(current);
     
-    /*
-     * Mark the current process as nacc process.
-     * Else the linux don't know how to handle it.
+    /* 
+     * Set from preparation state to real nacc state.
+     * Here we still don't have to reclaim.
      */
-    // current->thread.nacc_flag = 1; 
-
-    unsigned long current_gp;
-
-    printk(KERN_ERR "[Linux]: runc init has invoked the linux to handle the invocation process. \n");
-
-    printk(KERN_ERR "[Linux]: container id is %lx. \n", cid);
-
-	printk(KERN_ERR "[Linux]: pt_regs details:\n");
-    printk(KERN_ERR "[Linux]: epc (pc): 0x%lx\n", regs->epc);
-    printk(KERN_ERR "[Linux]: ra (x1): 0x%lx\n", regs->ra);
-    printk(KERN_ERR "[Linux]: sp (x2): 0x%lx\n", regs->sp);
-    printk(KERN_ERR "[Linux]: gp (x3): 0x%lx\n", regs->gp);
-    printk(KERN_ERR "[Linux]: tp (x4): 0x%lx\n", regs->tp);
-    printk(KERN_ERR "[Linux]: t0 (x5): 0x%lx\n", regs->t0);
-    printk(KERN_ERR "[Linux]: t1 (x6): 0x%lx\n", regs->t1);
-    printk(KERN_ERR "[Linux]: t2 (x7): 0x%lx\n", regs->t2);
-    printk(KERN_ERR "[Linux]: s0 (x8): 0x%lx\n", regs->s0);
-    printk(KERN_ERR "[Linux]: s1 (x9): 0x%lx\n", regs->s1);
-    printk(KERN_ERR "[Linux]: a0 (x10): 0x%lx\n", regs->a0);
-    printk(KERN_ERR "[Linux]: a1 (x11): 0x%lx\n", regs->a1);
-    printk(KERN_ERR "[Linux]: a2 (x12): 0x%lx\n", regs->a2);
-    printk(KERN_ERR "[Linux]: a3 (x13): 0x%lx\n", regs->a3);
-    printk(KERN_ERR "[Linux]: a4 (x14): 0x%lx\n", regs->a4);
-    printk(KERN_ERR "[Linux]: a5 (x15): 0x%lx\n", regs->a5);
-    printk(KERN_ERR "[Linux]: a6 (x16): 0x%lx\n", regs->a6);
-    printk(KERN_ERR "[Linux]: a7 (x17): 0x%lx\n", regs->a7);
-    printk(KERN_ERR "[Linux]: s2 (x18): 0x%lx\n", regs->s2);
-    printk(KERN_ERR "[Linux]: s3 (x19): 0x%lx\n", regs->s3);
-    printk(KERN_ERR "[Linux]: s4 (x20): 0x%lx\n", regs->s4);
-    printk(KERN_ERR "[Linux]: s5 (x21): 0x%lx\n", regs->s5);
-    printk(KERN_ERR "[Linux]: s6 (x22): 0x%lx\n", regs->s6);
-    printk(KERN_ERR "[Linux]: s7 (x23): 0x%lx\n", regs->s7);
-    printk(KERN_ERR "[Linux]: s8 (x24): 0x%lx\n", regs->s8);
-    printk(KERN_ERR "[Linux]: s9 (x25): 0x%lx\n", regs->s9);
-    printk(KERN_ERR "[Linux]: s10 (x26): 0x%lx\n", regs->s10);
-    printk(KERN_ERR "[Linux]: s11 (x27): 0x%lx\n", regs->s11);
-    printk(KERN_ERR "[Linux]: t3 (x28): 0x%lx\n", regs->t3);
-    printk(KERN_ERR "[Linux]: t4 (x29): 0x%lx\n", regs->t4);
-    printk(KERN_ERR "[Linux]: t5 (x30): 0x%lx\n", regs->t5);
-    printk(KERN_ERR "[Linux]: t6 (x31): 0x%lx\n", regs->t6);
-    printk(KERN_ERR "[Linux]: status: 0x%lx\n", regs->status);
-    printk(KERN_ERR "[Linux]: badaddr: 0x%lx\n", regs->badaddr);
-    printk(KERN_ERR "[Linux]: cause: 0x%lx\n", regs->cause);
-    printk(KERN_ERR "[Linux]: orig_a0: 0x%lx\n", regs->orig_a0);
-	/*
-     * Invoke an SBI call to the OpenSBI.
-	 */
-
-	printk(KERN_ERR "[Linux]: regs is %lx. \n", (unsigned long) regs);
-
-    printk(KERN_ERR "[Linux]: allocate a portion of memory for shared memory with agent. \n");
-
-    // char* shared_mem = (char*) kmalloc(2 * PAGE_SIZE, GFP_KERNEL);
+    current->thread.nacc_flag = NACC_INITED;
+    
+    /* 
+     * First allocate a contiguous virtual memory region to the process, for agent.
+     * Then transfer the PTP.
+     */
+    printk(KERN_ERR "[Linux]: start_thread is invoked for NACC process. \n");
+    virt_agent = get_unmapped_area(NULL, 0, NACC_AGENT_MEM_SIZE, 0, 0);
+    printk(KERN_ERR "[Linux]: Found an unmapped region with virt_agent %lx\n", virt_agent);
 
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
-    /*
-     * The first page will be used to transfer pt_regs info, while the second will transfer other info.
-     */
-    
-    
-    struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, cid, agent_virt_start, (unsigned long) regs, (unsigned long) do_irq, (unsigned long) excp_vect_table, current_gp);
+    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, virt_agent, pid, (unsigned long) regs, (unsigned long) do_irq, (unsigned long) excp_vect_table, current_gp);
+}
 
-    if (ret.error) {
-		pr_err("[Linux]: SBI call SBI_EXT_NACC_INVOKE failed with error %lx\n", ret.error);
-		return -1;
-	}
+SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
+{
+    unsigned long pid;
+    printk(KERN_ERR "[Linux] register a new NACC process. \n");
+
+    /*
+     * Mark the current process as nacc process here.
+     * However, as the preparation state.
+     */
+    current->thread.nacc_flag = NACC_PREPARE;
+
+    pid = current->pid;
+    printk(KERN_ERR "[Linux]: container id is %lx. \n", cid);
+
+    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, pid, 0, 0, 0, 0);
 
     printk(KERN_ERR "[Linux]: GO BACK TO RUNC. \n");
 
-	return 0;
-}
-
-SYSCALL_DEFINE0(nacc_loop_test)
-{
-    printk(KERN_ERR "[Linux] syscall loop successful\n");
-
     return 0;
-}
-
-SYSCALL_DEFINE0(nacc_transfer_ptp)
-{
-    /* 
-     * One Entry contains <old_pfn, new_pfn>, which is the size of unsigned long 
-     * While the whole size of the transfer_result won't exceed one page size.
-     */
-    current->thread.nacc_flag = 1;
-    struct sbiret ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_TRANSFER_PTP, 0, 0, 0, 0, 0, 0);
-
-    if (ret.error) {
-        pr_err("[Linux]: SBI call SBI_EXT_NACC_TRANSFER_PTP failed with error %lx\n", ret.error);
-        return -1;
-    }
-
-    printk(KERN_ERR "[Linux]: Successfully transfered Page Table Page mappings from SBI to Linux. \n");
-    printk(KERN_ERR "[Linux]: Checks whether virt address %lx can be used? \n", nacc_mappings_virt);
-
-    printk(KERN_ERR "[Linux]: Exit soon. \n");
-    return ret.value;
 }
 
 /* Not defined using SYSCALL_DEFINE0 to avoid error injection */

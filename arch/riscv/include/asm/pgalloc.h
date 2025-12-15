@@ -176,7 +176,7 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 				  unsigned long addr)
 {
 	struct ptdesc *ptdesc;
-	if(current->thread.nacc_flag){
+	if(current->thread.nacc_flag & NACC_RECLAIM){
 		printk(KERN_ERR "[__pmd_free_tlb]: pmd_page_nacc will be called.\n");
 		ptdesc = virt_to_ptdesc_nacc(pmd);
 	} else {

@@ -17,6 +17,8 @@
 #include <linux/uaccess.h>
 #include <linux/personality.h>
 
+#include <linux/syscalls.h>
+
 #include <asm/unistd.h>
 #include <asm/processor.h>
 #include <asm/csr.h>
@@ -29,11 +31,15 @@
 #include <asm/cpufeature.h>
 #include <asm/exec.h>
 
+#include <linux/mman.h>
 #if defined(CONFIG_STACKPROTECTOR) && !defined(CONFIG_STACKPROTECTOR_PER_TASK)
 #include <linux/stackprotector.h>
 unsigned long __stack_chk_guard __read_mostly;
 EXPORT_SYMBOL(__stack_chk_guard);
 #endif
+
+#define NACC_AGENT_MEM_BASE     0x180000000
+#define NACC_AGENT_MEM_SIZE	    0x20000000
 
 extern asmlinkage void ret_from_fork(void);
 

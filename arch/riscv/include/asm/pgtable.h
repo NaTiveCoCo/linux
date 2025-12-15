@@ -11,6 +11,10 @@
 
 #include <asm/pgtable-bits.h>
 
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
+
 #ifndef CONFIG_MMU
 #define KERNEL_LINK_ADDR	PAGE_OFFSET
 #define KERN_VIRT_SIZE		(UL(-1))
@@ -272,6 +276,11 @@ static inline void pmd_clear_nacc(pmd_t *pmdp)
 {
 	unsigned long new_pfn = virt_to_pfn((unsigned long)pmdp);
 	unsigned long old_pfn = page_nacc_mappings(new_pfn);
+    
+    if(old_pfn == new_pfn) {
+        set_pmd(pmdp, __pmd(0));
+        return;
+    }
 	/* 
  	 * [TODO]
 	 * - according to the pmdp, get the right entry in the old PTP.
@@ -280,6 +289,9 @@ static inline void pmd_clear_nacc(pmd_t *pmdp)
 	 */
 	unsigned long old_pmdp = (unsigned long) pfn_to_virt(old_pfn) + ((unsigned long)pmdp & (PAGE_SIZE - 1));
 	printk(KERN_ERR "[pmd_clear_nacc]: old_pmdp: %lx\n", old_pmdp);
+
+    // add old pmdp's pfn to reclaim list
+    add_to_reclaim_list(__page_val_to_pfn(pmd_val(*pmdp)));
 	set_pmd((pmd_t *)old_pmdp, __pmd(0));
 }
 #endif

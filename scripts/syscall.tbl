@@ -302,9 +302,8 @@
 
 244	or1k	or1k_atomic			sys_or1k_atomic
 
-255 riscv   nacc_transfer_ptp       sys_nacc_transfer_ptp
-256 riscv   nacc_loop_test          sys_nacc_loop_test
-257 riscv   nacc_invoke             sys_nacc_invoke 
+256 riscv   nacc_register           sys_nacc_register
+
 258	riscv	riscv_hwprobe			sys_riscv_hwprobe
 259	riscv	riscv_flush_icache		sys_riscv_flush_icache
 

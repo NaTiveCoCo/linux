@@ -71,7 +71,7 @@
 #ifdef CONFIG_RISCV
 #define SBI_EXT_NACC 0x4E414343
 
-#define SBI_EXT_AGENT_VERIFY 1
+#define SBI_EXT_LINUX_VERIFY 0x4
 
 #endif
 
@@ -5341,7 +5341,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
 				printk(KERN_INFO "nacc: context_switch from user to kernel\n");
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_AGENT_VERIFY, (unsigned long) virt_to_pfn(prev->mm->pgd), 0, 0, 0, 0, 0);
+                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, 0, 0, 0, 0, 0);
             }
 #endif
             mmgrab_lazy_tlb(prev->active_mm);
@@ -5369,7 +5369,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_AGENT_VERIFY, 0, (unsigned long) virt_to_pfn(next->mm->pgd), 0, 0, 0, 0);
+                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, 0, (unsigned long) next->pid, 0, 0, 0, 0);
             }
 #endif
         } else {
@@ -5377,13 +5377,13 @@ context_switch(struct rq *rq, struct task_struct *prev,
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag && prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_AGENT_VERIFY, (unsigned long) virt_to_pfn(prev->mm->pgd), (unsigned long) virt_to_pfn(next->mm->pgd), 0, 0, 0, 0);
+                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, (unsigned long) next->pid, 0, 0, 0, 0);
             } else if (next->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_AGENT_VERIFY, 0, (unsigned long) virt_to_pfn(next->mm->pgd), 0, 0, 0, 0);
+                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, 0, (unsigned long) next->pid, 0, 0, 0, 0);
             } else if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_AGENT_VERIFY, (unsigned long) virt_to_pfn(prev->mm->pgd), 0, 0, 0, 0, 0);
+                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, 0, 0, 0, 0, 0);
             }
 #endif
         }

@@ -314,49 +314,8 @@ asmlinkage __visible __trap_section void do_trap_break(struct pt_regs *regs)
 asmlinkage __visible __trap_section  __no_stack_protector
 void do_trap_ecall_u(struct pt_regs *regs)
 {
-    if (current->thread.nacc_flag) {
-        // printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' pt_regs details:\n");
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' regs: 0x%lx\n", (uintptr_t) regs);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' epc (pc): 0x%lx\n", regs->epc);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' ra (x1): 0x%lx\n", regs->ra);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' sp (x2): 0x%lx\n", regs->sp);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' gp (x3): 0x%lx\n", regs->gp);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' tp (x4): 0x%lx\n", regs->tp);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t0 (x5): 0x%lx\n", regs->t0);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t1 (x6): 0x%lx\n", regs->t1);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t2 (x7): 0x%lx\n", regs->t2);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s0 (x8): 0x%lx\n", regs->s0);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s1 (x9): 0x%lx\n", regs->s1);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a0 (x10): 0x%lx\n", regs->a0);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a1 (x11): 0x%lx\n", regs->a1);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a2 (x12): 0x%lx\n", regs->a2);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a3 (x13): 0x%lx\n", regs->a3);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a4 (x14): 0x%lx\n", regs->a4);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a5 (x15): 0x%lx\n", regs->a5);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a6 (x16): 0x%lx\n", regs->a6);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' a7 (x17): 0x%lx\n", regs->a7);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s2 (x18): 0x%lx\n", regs->s2);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s3 (x19): 0x%lx\n", regs->s3);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s4 (x20): 0x%lx\n", regs->s4);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s5 (x21): 0x%lx\n", regs->s5);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s6 (x22): 0x%lx\n", regs->s6);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s7 (x23): 0x%lx\n", regs->s7);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s8 (x24): 0x%lx\n", regs->s8);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s9 (x25): 0x%lx\n", regs->s9);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s10 (x26): 0x%lx\n", regs->s10);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' s11 (x27): 0x%lx\n", regs->s11);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t3 (x28): 0x%lx\n", regs->t3);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t4 (x29): 0x%lx\n", regs->t4);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t5 (x30): 0x%lx\n", regs->t5);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' t6 (x31): 0x%lx\n", regs->t6);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' status: 0x%lx\n", regs->status);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' badaddr: 0x%lx\n", regs->badaddr);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' cause: 0x%lx\n", regs->cause);
-		// printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' orig_a0: 0x%lx\n", regs->orig_a0);
-    }
-
 	if (user_mode(regs)) {
-        if (current->thread.nacc_flag) {
+        if (current->thread.nacc_flag & NACC_RECLAIM) {
             printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' user_mode\n");
         }
 		long syscall = regs->a7;
@@ -387,7 +346,7 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		choose_random_kstack_offset(get_random_u16());
 
 		syscall_exit_to_user_mode(regs);
-		if (current->thread.nacc_flag) {
+		if (current->thread.nacc_flag & NACC_RECLAIM) {
             printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' syscall_exit_to_user_mode epc: %lx\n", regs->epc);
         }
 	} else {
@@ -399,12 +358,13 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		irqentry_nmi_exit(regs, state);
 	}
 
-    if (current->thread.nacc_flag) {
+    if (current->thread.nacc_flag & NACC_INITED) {
         printk(KERN_ERR "[Linux]: Back to 'do_trap_ecall_u' in kernel. With regs: %lx\n", (unsigned long)regs);
         printk(KERN_ERR "[Linux]: regs->sstatus: %lx\n", regs->status);
 		printk(KERN_ERR "[Linux]: regs->epc: %lx\n", regs->epc);        
         // 0001000    00010 00000 000 00000 0001011
         csr_write(CSR_NACC_SSTATUS, regs->status);
+        // acall logic should be modified.
         __asm__ volatile (".word 0x1020000b" ::: "memory");
     }
 }
@@ -412,41 +372,41 @@ void do_trap_ecall_u(struct pt_regs *regs)
 #ifdef CONFIG_MMU
 asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 {
-	if (current->thread.nacc_flag) {
+	if (current->thread.nacc_flag & NACC_INITED) {
         printk(KERN_ERR "[Linux]: 'do_page_fault' pt_regs details:\n");
 		printk(KERN_ERR "[Linux]: 'do_page_fault' regs: 0x%lx\n", (uintptr_t) regs);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' epc (pc): 0x%lx\n", regs->epc);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' ra (x1): 0x%lx\n", regs->ra);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' sp (x2): 0x%lx\n", regs->sp);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' gp (x3): 0x%lx\n", regs->gp);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' tp (x4): 0x%lx\n", regs->tp);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t0 (x5): 0x%lx\n", regs->t0);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t1 (x6): 0x%lx\n", regs->t1);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t2 (x7): 0x%lx\n", regs->t2);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s0 (x8): 0x%lx\n", regs->s0);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s1 (x9): 0x%lx\n", regs->s1);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a0 (x10): 0x%lx\n", regs->a0);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a1 (x11): 0x%lx\n", regs->a1);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a2 (x12): 0x%lx\n", regs->a2);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a3 (x13): 0x%lx\n", regs->a3);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a4 (x14): 0x%lx\n", regs->a4);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a5 (x15): 0x%lx\n", regs->a5);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a6 (x16): 0x%lx\n", regs->a6);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' a7 (x17): 0x%lx\n", regs->a7);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s2 (x18): 0x%lx\n", regs->s2);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s3 (x19): 0x%lx\n", regs->s3);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s4 (x20): 0x%lx\n", regs->s4);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s5 (x21): 0x%lx\n", regs->s5);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s6 (x22): 0x%lx\n", regs->s6);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s7 (x23): 0x%lx\n", regs->s7);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s8 (x24): 0x%lx\n", regs->s8);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s9 (x25): 0x%lx\n", regs->s9);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s10 (x26): 0x%lx\n", regs->s10);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' s11 (x27): 0x%lx\n", regs->s11);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t3 (x28): 0x%lx\n", regs->t3);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t4 (x29): 0x%lx\n", regs->t4);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t5 (x30): 0x%lx\n", regs->t5);
-		printk(KERN_ERR "[Linux]: 'do_page_fault' t6 (x31): 0x%lx\n", regs->t6);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' epc (pc): 0x%lx\n", regs->epc);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' ra (x1): 0x%lx\n", regs->ra);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' sp (x2): 0x%lx\n", regs->sp);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' gp (x3): 0x%lx\n", regs->gp);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' tp (x4): 0x%lx\n", regs->tp);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t0 (x5): 0x%lx\n", regs->t0);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t1 (x6): 0x%lx\n", regs->t1);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t2 (x7): 0x%lx\n", regs->t2);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s0 (x8): 0x%lx\n", regs->s0);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s1 (x9): 0x%lx\n", regs->s1);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a0 (x10): 0x%lx\n", regs->a0);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a1 (x11): 0x%lx\n", regs->a1);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a2 (x12): 0x%lx\n", regs->a2);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a3 (x13): 0x%lx\n", regs->a3);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a4 (x14): 0x%lx\n", regs->a4);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a5 (x15): 0x%lx\n", regs->a5);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a6 (x16): 0x%lx\n", regs->a6);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' a7 (x17): 0x%lx\n", regs->a7);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s2 (x18): 0x%lx\n", regs->s2);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s3 (x19): 0x%lx\n", regs->s3);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s4 (x20): 0x%lx\n", regs->s4);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s5 (x21): 0x%lx\n", regs->s5);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s6 (x22): 0x%lx\n", regs->s6);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s7 (x23): 0x%lx\n", regs->s7);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s8 (x24): 0x%lx\n", regs->s8);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s9 (x25): 0x%lx\n", regs->s9);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s10 (x26): 0x%lx\n", regs->s10);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' s11 (x27): 0x%lx\n", regs->s11);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t3 (x28): 0x%lx\n", regs->t3);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t4 (x29): 0x%lx\n", regs->t4);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t5 (x30): 0x%lx\n", regs->t5);
+		// printk(KERN_ERR "[Linux]: 'do_page_fault' t6 (x31): 0x%lx\n", regs->t6);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' status: 0x%lx\n", regs->status);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr: 0x%lx\n", regs->badaddr);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' cause: 0x%lx\n", regs->cause);
@@ -459,6 +419,16 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 	local_irq_disable();
 
 	irqentry_exit(regs, state);
+
+    if (current->thread.nacc_flag & NACC_INITED) {
+        printk(KERN_ERR "[Linux]: Back to 'do_page_fault' in kernel. With regs: %lx\n", (unsigned long)regs);
+        printk(KERN_ERR "[Linux]: regs->sstatus: %lx\n", regs->status);
+		printk(KERN_ERR "[Linux]: regs->epc: %lx\n", regs->epc);        
+        // 0001000    00010 00000 000 00000 0001011
+        csr_write(CSR_NACC_SSTATUS, regs->status);
+        // acall logic should be modified.
+        __asm__ volatile (".word 0x1020000b" ::: "memory");
+    }
 }
 #endif
 
@@ -484,9 +454,10 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 
 	irqentry_exit(regs, state);
 
-    if (current->thread.nacc_flag) {
+    if (current->thread.nacc_flag & NACC_INITED) {
         // 0001000    00010 00000 000 00000 0001011
 		csr_write(CSR_NACC_SSTATUS, regs->status);
+        printk(KERN_ERR "[Linux]: Back to 'do_irq' in kernel. With regs->status: %lx\n", regs->status);
         __asm__ volatile (".word 0x1020000b" ::: "memory");
     }
 }

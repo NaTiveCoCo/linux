@@ -16,6 +16,9 @@
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
 /*
  * If a p?d_bad entry is found while walking page tables, report
  * the error, before resetting entry to p?d_none.  Usually (but
@@ -398,11 +401,17 @@ pte_t *__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte;
 again:
 #ifdef CONFIG_RISCV
-	if (unlikely(current->thread.nacc_flag)) {
+	if (unlikely(current->thread.nacc_flag & NACC_RECLAIM)) {
+        /* Find the corresponding old PTP. */
         pte = __pte_offset_map_nacc(pmd, addr, &pmdval);
-		// printk(KERN_ERR "[Linux]: nacc_flag enabled");
-		// printk(KERN_ERR "[Linux]: nacc_map pte_val: 0x%lx pte: 0x%lx pte pfn: 0x%lx\n", (unsigned long)pte_val(*pte), (unsigned long)pte, pte_pfn(*pte));
-	    ptl = pte_lockptr_nacc(mm, &pmdval);
+        /* */
+		ptl = pte_lockptr_nacc(mm, &pmdval);
+        goto setlock;
+    } else if (unlikely(current->thread.nacc_flag & NACC_INITED)) {
+        /* Normally go through the page table walk process. */
+        pte = __pte_offset_map(pmd, addr, &pmdval);
+        /* However, try to seize the another lock if it has. */
+        ptl = pte_lockptr_nacc(mm, &pmdval);
         goto setlock;
     }
 #endif	

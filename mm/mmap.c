@@ -53,6 +53,8 @@
 #include <asm/tlb.h>
 #include <asm/mmu_context.h>
 
+#include <asm/nacc.h>
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/mmap.h>
 
@@ -776,6 +778,27 @@ generic_get_unmapped_area(struct file *filp, unsigned long addr,
 	info.low_limit = mm->mmap_base;
 	info.high_limit = mmap_end;
 	info.start_gap = stack_guard_placement(vm_flags);
+	return vm_unmapped_area(&info);
+}
+
+unsigned long
+nacc_get_unmapped_area_aligned(struct file *filp, unsigned long addr,
+			  unsigned long len, unsigned long pgoff,
+			  unsigned long flags, vm_flags_t vm_flags)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_unmapped_area_info info = {};
+	const unsigned long mmap_end = arch_get_mmap_end(addr, len, flags);
+
+    info.flags = VM_UNMAPPED_AREA_TOPDOWN;
+	info.length = len;
+	info.low_limit = mm->mmap_base;
+	info.high_limit = mmap_end;
+	
+    info.align_mask = len - 1;
+    info.align_offset = 0;
+
+    info.start_gap = stack_guard_placement(vm_flags);
 	return vm_unmapped_area(&info);
 }
 
@@ -1933,7 +1956,10 @@ void exit_mmap(struct mm_struct *mm)
 	vma_iter_set(&vmi, vma->vm_end);
 	free_pgtables(&tlb, &vmi.mas, vma, FIRST_USER_ADDRESS,
 		      USER_PGTABLES_CEILING, true);
-	tlb_finish_mmu(&tlb);
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
+        flush_reclaim_list();
+    }
+    tlb_finish_mmu(&tlb);
 
 	/*
 	 * Walk the list again, actually closing and freeing it, with preemption

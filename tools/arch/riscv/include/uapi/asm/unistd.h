@@ -41,18 +41,20 @@
 #endif
 __SYSCALL(__NR_riscv_flush_icache, sys_riscv_flush_icache)
 
-#ifndef __NR_nacc_invoke
-#define __NR_nacc_invoke (__NR_arch_specific_syscall + 13)
+// #ifndef __NR_nacc_invoke
+// #define __NR_nacc_invoke (__NR_arch_specific_syscall + 13)
+// #endif
 
-#ifndef __NR_nacc_loop_test
-#define __NR_nacc_loop_test  (__NR_arch_specific_syscall + 12)
+/* register the current nacc process in the monitor. */
+#ifndef __NR_nacc_register
+#define __NR_nacc_register  (__NR_arch_specific_syscall + 12)
 #endif
 
-#ifndef __NR_nacc_transfer_ptp
-#define __NR_nacc_transfer_ptp (__NR_arch_specific_syscall + 11)
-#endif 
+// #ifndef __NR_nacc_transfer_ptp
+// #define __NR_nacc_transfer_ptp (__NR_arch_specific_syscall + 11)
+// #endif 
 
-__SYSCALL(__NR_nacc_invoke, sys_nacc_invoke)
-__SYSCALL(__NR_nacc_loop_test, sys_nacc_loop_test)
-__SYSCALL(__NR_nacc_transfer_ptp, sys_nacc_transfer_ptp)
+//__SYSCALL(__NR_nacc_invoke, sys_nacc_invoke)
+__SYSCALL(__NR_nacc_register, sys_nacc_register)
+//__SYSCALL(__NR_nacc_transfer_ptp, sys_nacc_transfer_ptp)
 

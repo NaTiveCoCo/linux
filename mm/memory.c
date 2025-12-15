@@ -190,7 +190,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token;
-	if(current->thread.nacc_flag){
+	if(current->thread.nacc_flag & NACC_RECLAIM){
 		token = pmd_pgtable_nacc(*pmd);
 		pmd_clear_nacc(pmd);
 		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
@@ -214,9 +214,6 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	// change the pmd here, make sure we are leading to the old pfn?
 	// but should not interfere with the unmap_exit function we've used before.
 	pmd = pmd_offset(pud, addr);
-	if(current->thread.nacc_flag) {
-		printk(KERN_ERR "[Linux]: before free pte range\n");
-	}
 	do {
 		next = pmd_addr_end(addr, end);
 		if (pmd_none_or_clear_bad(pmd))
@@ -225,9 +222,6 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		free_pte_range(tlb, pmd, addr);
 	} while (pmd++, addr = next, addr != end);
 
-	if(current->thread.nacc_flag) {
-		printk(KERN_ERR "[Linux]: after free pte range\n");
-	}
 	start &= PUD_MASK;
 	if (start < floor)
 		return;
@@ -241,12 +235,12 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 
 	pmd = pmd_offset(pud, start);
 	pud_clear(pud);
-    if(current->thread.nacc_flag) {
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: after pud_clear\n");
 	}
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
-    if(current->thread.nacc_flag) {
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
 	}
 }
@@ -261,7 +255,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
 
 	start = addr;
 	pud = pud_offset(p4d, addr);
-	if(current->thread.nacc_flag) {
+	if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: before free pmd range\n");
 	}
 	do {
@@ -270,7 +264,7 @@ static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
 			continue;
 		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
 	} while (pud++, addr = next, addr != end);
-	if(current->thread.nacc_flag) {
+	if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: after free pmd range\n");
 	}
 	start &= P4D_MASK;
@@ -300,7 +294,7 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 
 	start = addr;
 	p4d = p4d_offset(pgd, addr);
-	if(current->thread.nacc_flag) {
+	if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: before free pud_range\n");
 	}
 	do {
@@ -310,7 +304,7 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		free_pud_range(tlb, p4d, addr, next, floor, ceiling);
 	} while (p4d++, addr = next, addr != end);
 
-	if(current->thread.nacc_flag) {
+	if(current->thread.nacc_flag & NACC_RECLAIM) {
 		printk(KERN_ERR "[Linux]: After free pud_range\n");
 	}
 	start &= PGDIR_MASK;
@@ -1525,9 +1519,6 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 	struct mm_struct *mm = tlb->mm;
 	bool delay_rmap = false;
 
-	if(current->thread.nacc_flag) {
-		// printk(KERN_ERR "zap_present_folio_ptes: pte_addr: 0x%lx pte: 0x%lx\n", (unsigned long)pte, pte_val(*pte));
-	}
 	if (!folio_test_anon(folio)) {
 		ptent = get_and_clear_full_ptes(mm, addr, pte, nr, tlb->fullmm);
 		if (pte_dirty(ptent)) {
