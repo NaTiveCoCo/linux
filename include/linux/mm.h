@@ -315,6 +315,7 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_WIPEONFORK	0x02000000	/* Wipe VMA contents in child. */
 #define VM_DONTDUMP	0x04000000	/* Do not include in the core dump */
 
+#define VM_NACC 0x08000000 /* This region is of the VM_NACC usage. */
 #ifdef CONFIG_MEM_SOFT_DIRTY
 # define VM_SOFTDIRTY	0x08000000	/* Not soft dirty clean area */
 #else
@@ -2862,9 +2863,9 @@ static inline struct ptdesc *virt_to_ptdesc(const void *x)
 
 static inline struct ptdesc *virt_to_ptdesc_nacc(const void *x)
 {
-    unsigned long old_pfn = virt_to_pfn(x);
-    if(old_pfn >= NACC_PTP_PFN_BASE && old_pfn < NACC_PTP_PFN_END) {
-        add_to_reclaim_list(old_pfn);
+    unsigned long new_pfn = virt_to_pfn(x);
+    if(new_pfn >= NACC_PTP_PFN_BASE && new_pfn < NACC_PTP_PFN_END) {
+        add_to_reclaim_list(new_pfn);
     }
 	return page_ptdesc(virt_to_page_nacc(x));
 }
@@ -3072,9 +3073,24 @@ static inline struct ptdesc *pmd_ptdesc(pmd_t *pmd)
 	return page_ptdesc(pmd_pgtable_page(pmd));
 }
 
+static inline struct ptdesc *pmd_ptdesc_nacc(pmd_t *pmd)
+{
+    /* Found the corresponding struct page* for pmd, if it has old pfn mappings */
+    unsigned long mask = ~(PTRS_PER_PMD * sizeof(pmd_t) - 1);
+    unsigned long new_pfn = virt_to_pfn((void *)((unsigned long) pmd & mask));
+    unsigned long actual_pfn = page_nacc_mappings(new_pfn);
+    
+	return page_ptdesc(pfn_to_page(actual_pfn));
+}
+
 static inline spinlock_t *pmd_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
 	return ptlock_ptr(pmd_ptdesc(pmd));
+}
+
+static inline spinlock_t *pmd_lockptr_nacc(struct mm_struct *mm, pmd_t *pmd)
+{
+	return ptlock_ptr(pmd_ptdesc_nacc(pmd));
 }
 
 static inline bool pmd_ptlock_init(struct ptdesc *ptdesc)
@@ -3111,8 +3127,13 @@ static inline void pmd_ptlock_free(struct ptdesc *ptdesc) {}
 
 static inline spinlock_t *pmd_lock(struct mm_struct *mm, pmd_t *pmd)
 {
-	spinlock_t *ptl = pmd_lockptr(mm, pmd);
-	spin_lock(ptl);
+    spinlock_t *ptl;
+    if (current->thread.nacc_flag & NACC_INITED) {
+        ptl = pmd_lockptr_nacc(mm, pmd);
+    } else {
+	    ptl = pmd_lockptr(mm, pmd);
+    }
+    spin_lock(ptl);
 	return ptl;
 }
 

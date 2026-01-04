@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/gfp.h>
 #include <asm/page.h>
+#include <asm/processor.h>
 
 #include <asm/io.h>
 
@@ -105,7 +106,21 @@ void nacc_invoke(void)
      * Then transfer the PTP.
      */
     printk(KERN_ERR "[Linux]: start_thread is invoked for NACC process. \n");
-    virt_agent = get_unmapped_area(NULL, 0, NACC_AGENT_MEM_SIZE, 0, 0);
+    virt_agent = get_unmapped_area(NULL, TASK_UNMAPPED_BASE, NACC_AGENT_MEM_SIZE, 0, 0);
+    struct vm_area_struct *vma = vm_area_alloc(current->mm);
+    vma->vm_start = virt_agent;
+    vma->vm_end = virt_agent + NACC_AGENT_MEM_SIZE;
+
+    /* This VMA region should not be included in normal procedure. */
+    vm_flags_init(vma, VM_PFNMAP | VM_IO | VM_DONTEXPAND | VM_DONTDUMP | VM_NACC);
+    vma->vm_page_prot = pgprot_noncached(PAGE_NONE);
+
+    if (insert_vm_struct(current->mm, vma)) {
+        printk(KERN_ERR "[Linux]: failed to insert VMA for NACC agent.\n");
+        vm_area_free(vma);
+        return;
+    }
+
     printk(KERN_ERR "[Linux]: Found an unmapped region with virt_agent %lx\n", virt_agent);
 
     asm volatile("mv %0, gp" : "=r"(current_gp));

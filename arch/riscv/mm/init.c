@@ -232,6 +232,7 @@ static void __init parse_memmap_one(char *p)
 
 	case '$':
 		start_at = memparse(p + 1, &p);
+        memblock_add(start_at, mem_size);
 		memblock_reserve(start_at, mem_size);
 		// memblock_mark_nomap(start_at,  mem_size);
 		break;

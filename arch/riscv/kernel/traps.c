@@ -311,12 +311,26 @@ asmlinkage __visible __trap_section void do_trap_break(struct pt_regs *regs)
 	}
 }
 
+#define __SYSCALL_WITH_COMPAT(nr, native, compat) __SYSCALL(nr, native)
+#define __SYSCALL(nr, call) [nr] = #call,
+
+static const char * const syscall_names[] = {
+	[0 ... __NR_syscalls - 1] = "unknown",
+#include <asm/syscall_table.h>
+};
+
+#undef __SYSCALL
+#undef __SYSCALL_WITH_COMPAT
+
 asmlinkage __visible __trap_section  __no_stack_protector
 void do_trap_ecall_u(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
-        if (current->thread.nacc_flag & NACC_RECLAIM) {
-            printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' user_mode\n");
+        if (current->thread.nacc_flag & NACC_RECLAIM || current->thread.nacc_flag & NACC_INITED) {
+            const char *name = "unknown";
+            if (regs->a7 < ARRAY_SIZE(syscall_names))
+                name = syscall_names[regs->a7];
+            printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' syscall: %lx (%s)\n", regs->a7, name);
         }
 		long syscall = regs->a7;
 
@@ -409,6 +423,7 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 		// printk(KERN_ERR "[Linux]: 'do_page_fault' t6 (x31): 0x%lx\n", regs->t6);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' status: 0x%lx\n", regs->status);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr: 0x%lx\n", regs->badaddr);
+        printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr vpn[2]: %ld vpn[1]: %ld vpn[0]: %ld\n", (regs->badaddr) >> 30,  (regs->badaddr >> 21) & 0x1FF, (regs->badaddr >> 12) & 0x1FF);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' cause: 0x%lx\n", regs->cause);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' orig_a0: 0x%lx\n", regs->orig_a0);
 	}

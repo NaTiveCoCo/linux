@@ -3630,6 +3630,10 @@ static vm_fault_t filemap_map_order0_folio(struct vm_fault *vmf,
 vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 			     pgoff_t start_pgoff, pgoff_t end_pgoff)
 {
+    if (current->thread.nacc_flag)
+    {
+        printk(KERN_ERR "[Linux]: Kernel filemap_map_pages\n");
+    }
 	struct vm_area_struct *vma = vmf->vma;
 	struct file *file = vma->vm_file;
 	struct address_space *mapping = file->f_mapping;

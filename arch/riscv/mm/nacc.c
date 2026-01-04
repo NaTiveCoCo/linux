@@ -39,3 +39,11 @@ void flush_reclaim_list(void)
 	}
 	put_cpu_var(reclaim_list);
 }
+
+void pgtbl_debug(unsigned long pgd)
+{
+    printk(KERN_ERR "[Linux]: calling pgtbl_debug SBI call\n");
+    sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_DEBUG,
+              pgd, 0,
+              0, 0, 0, 0);
+}

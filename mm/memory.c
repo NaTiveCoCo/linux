@@ -92,6 +92,10 @@
 #include "internal.h"
 #include "swap.h"
 
+#include <asm/nacc.h>
+#include <asm/sbi.h>
+
+
 #if defined(LAST_CPUPID_NOT_IN_PAGE_FLAGS) && !defined(CONFIG_COMPILE_TEST)
 #warning Unfortunate NUMA and NUMA Balancing config, growing page-frame for last_cpupid.
 #endif
@@ -191,7 +195,10 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 {
 	pgtable_t token;
 	if(current->thread.nacc_flag & NACC_RECLAIM){
+        // return the old pfn struct page.
 		token = pmd_pgtable_nacc(*pmd);
+        // set the old pfn (pmd) entry to zero
+        // and recliam the new pfn (pte)
 		pmd_clear_nacc(pmd);
 		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
 	} else {
@@ -235,14 +242,14 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 
 	pmd = pmd_offset(pud, start);
 	pud_clear(pud);
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: after pud_clear\n");
-	}
+    // if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: after pud_clear\n");
+	// }
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
-	}
+    // if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
+	// }
 }
 
 static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
@@ -255,18 +262,18 @@ static inline void free_pud_range(struct mmu_gather *tlb, p4d_t *p4d,
 
 	start = addr;
 	pud = pud_offset(p4d, addr);
-	if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: before free pmd range\n");
-	}
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: before free pmd range\n");
+	// }
 	do {
 		next = pud_addr_end(addr, end);
 		if (pud_none_or_clear_bad(pud))
 			continue;
 		free_pmd_range(tlb, pud, addr, next, floor, ceiling);
 	} while (pud++, addr = next, addr != end);
-	if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: after free pmd range\n");
-	}
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: after free pmd range\n");
+	// }
 	start &= P4D_MASK;
 	if (start < floor)
 		return;
@@ -294,9 +301,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 
 	start = addr;
 	p4d = p4d_offset(pgd, addr);
-	if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: before free pud_range\n");
-	}
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: before free pud_range\n");
+	// }
 	do {
 		next = p4d_addr_end(addr, end);
 		if (p4d_none_or_clear_bad(p4d))
@@ -304,9 +311,9 @@ static inline void free_p4d_range(struct mmu_gather *tlb, pgd_t *pgd,
 		free_pud_range(tlb, p4d, addr, next, floor, ceiling);
 	} while (p4d++, addr = next, addr != end);
 
-	if(current->thread.nacc_flag & NACC_RECLAIM) {
-		printk(KERN_ERR "[Linux]: After free pud_range\n");
-	}
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "[Linux]: After free pud_range\n");
+	// }
 	start &= PGDIR_MASK;
 	if (start < floor)
 		return;
@@ -1632,17 +1639,17 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	int rss[NR_MM_COUNTERS];
 	spinlock_t *ptl;
 	pte_t *start_pte;
-	pte_t *pte;
+	pte_t *pte, *old_pte;
 	swp_entry_t entry;
 	int nr;
 
 	tlb_change_page_size(tlb, PAGE_SIZE);
 	init_rss_vec(rss);
-	start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
-	// if(current->thread.nacc_flag) {
-	// 	printk(KERN_ERR "zap_pte_range:\n");
-	// 	printk(KERN_ERR "pmd pfn: %lx pte pfn: %lx\n", __page_val_to_pfn(pmd_val(*pmd)), __page_val_to_pfn(pte_val(*pte)));
-	// }
+	if(current->thread.nacc_flag & NACC_RECLAIM) {
+		printk(KERN_ERR "zap_pte_range: start\n");
+        printk(KERN_ERR "addr: %lx end: %lx\n", addr, end);
+    }
+    start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
 		return addr;
 
@@ -1650,6 +1657,9 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	arch_enter_lazy_mmu_mode();
 	do {
 		pte_t ptent = ptep_get(pte);
+       	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+		//     printk(KERN_ERR "ptent: %lx pte_present: %d pte_new: %d !: %d\n", pte_val(ptent), pte_present(ptent), pte_new(ptent), !pte_new(ptent));
+        // } 
 		struct folio *folio;
 		struct page *page;
 		int max_nr;
@@ -1662,10 +1672,28 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 			break;
 
 		if (pte_present(ptent)) {
-			max_nr = (end - addr) / PAGE_SIZE;
-			nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
+            max_nr = (end - addr) / PAGE_SIZE;
+			/* if the pte is new, then we can simply clear it, although it will trigger page fault, the monitor will handle it. */
+            if (current->thread.nacc_flag & NACC_RECLAIM) {
+                /* if the pte is old, then we found the old PTE and clear it. */
+                if (pte_user(ptent)) {
+                    if (!pte_new(ptent)) {
+                        old_pte = __pte_map_nacc(pmd, addr);
+                        nr = zap_present_ptes(tlb, vma, old_pte, ptent, max_nr,
+                                    addr, details, rss, &force_flush,
+                                    &force_break);
+                    } else {
+                        nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
+                                    addr, details, rss, &force_flush,
+                                    &force_break);
+                    }
+                    goto after_zap_present;
+                }
+            }
+            nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
 					      addr, details, rss, &force_flush,
 					      &force_break);
+after_zap_present:
 			if (unlikely(force_break)) {
 				addr += nr * PAGE_SIZE;
 				break;
@@ -1744,6 +1772,11 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	if (force_flush)
 		tlb_flush_mmu(tlb);
 
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
+		printk(KERN_ERR "zap_pte_range: end\n");
+        if (pte_user(ptep_get(pte)))
+            pgtbl_debug(virt_to_phys(mm->pgd));
+    }
 	return addr;
 }
 
@@ -1756,10 +1789,10 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	pmd = pmd_offset(pud, addr);
-	// if(current->thread.nacc_flag) {
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "zap_pmd_range: Before zap_pte_range\n");
 	// 	printk(KERN_ERR "*pud pfn: %lx *pmd pfn: %lx pmd pointer: %lx\n", __page_val_to_pfn(pud_val(*pud)), __page_val_to_pfn(pmd_val(*pmd)), (unsigned long)pmd);
-	// }
+    // }
 	do {
 		next = pmd_addr_end(addr, end);
 		if (is_swap_pmd(*pmd) || pmd_trans_huge(*pmd) || pmd_devmap(*pmd)) {
@@ -1790,6 +1823,9 @@ static inline unsigned long zap_pmd_range(struct mmu_gather *tlb,
 			pmd--;
 	} while (pmd++, cond_resched(), addr != end);
 
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "zap_pmd_range: end\n");
+	// }
 	return addr;
 }
 
@@ -1802,7 +1838,7 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	pud = pud_offset(p4d, addr);
-	// if(current->thread.nacc_flag) {
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "zap_pud_range: Before zap_pmd_range\n");
 	// 	printk(KERN_ERR "p4d pfn: %lx pud pfn: %lx\n", __page_val_to_pfn(p4d_val(*p4d)), __page_val_to_pfn(pud_val(*pud)));
 	// }
@@ -1823,7 +1859,10 @@ static inline unsigned long zap_pud_range(struct mmu_gather *tlb,
 next:
 		cond_resched();
 	} while (pud++, addr = next, addr != end);
-
+	
+    // if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "zap_pud_range: end\n");
+	// }
 	return addr;
 }
 
@@ -1836,7 +1875,7 @@ static inline unsigned long zap_p4d_range(struct mmu_gather *tlb,
 	unsigned long next;
 
 	p4d = p4d_offset(pgd, addr);
-	// if(current->thread.nacc_flag) {
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "zap_p4d_range: Before zap_pud_range\n");
 	// 	printk(KERN_ERR "pgd pfn: %lx p4d pfn: %lx\n", __page_val_to_pfn(pgd_val(*pgd)), __page_val_to_pfn(p4d_val(*p4d)));
 	// }
@@ -1846,7 +1885,9 @@ static inline unsigned long zap_p4d_range(struct mmu_gather *tlb,
 			continue;
 		next = zap_pud_range(tlb, vma, p4d, addr, next, details);
 	} while (p4d++, addr = next, addr != end);
-
+	// if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "zap_p4d_range: end\n");
+	// }
 	return addr;
 }
 
@@ -1861,17 +1902,24 @@ void unmap_page_range(struct mmu_gather *tlb,
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
-	// if(current->thread.nacc_flag) {
-	// 	printk(KERN_ERR "unmap_page_range: Before zap_p4d_range\n");
-	// 	printk(KERN_ERR "pgd pfn: %lx addr: %lx\n", __page_val_to_pfn(pgd_val(*pgd)), addr);
+	if (current->thread.nacc_flag & NACC_RECLAIM) {
+        if (vma->vm_flags & VM_NACC) {
+            printk(KERN_ERR "  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n", vma->vm_start, vma->vm_end);
+            pgtbl_debug(virt_to_phys(tlb->mm->pgd));
+            sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_AGENT_REGION, vma->vm_start, vma->vm_end, virt_to_phys(tlb->mm->pgd), 0, 0, 0);
+        }
+	} else {
+        do {
+            next = pgd_addr_end(addr, end);
+            if (pgd_none_or_clear_bad(pgd))
+                continue;
+            next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
+        } while (pgd++, addr = next, addr != end);
+    }
+    // if(current->thread.nacc_flag & NACC_RECLAIM) {
+	// 	printk(KERN_ERR "unmap_page_range: Before tlb_end_vma\n");
 	// }
-	do {
-		next = pgd_addr_end(addr, end);
-		if (pgd_none_or_clear_bad(pgd))
-			continue;
-		next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
-	} while (pgd++, addr = next, addr != end);
-	tlb_end_vma(tlb, vma);
+    tlb_end_vma(tlb, vma);
 }
 
 
@@ -1963,6 +2011,10 @@ void unmap_vmas(struct mmu_gather *tlb, struct ma_state *mas,
 				 mm_wr_locked);
 		hugetlb_zap_end(vma, &details);
 		vma = mas_find(mas, tree_end - 1);
+        // if (current->thread.nacc_flag & NACC_RECLAIM) {
+        //     printk(KERN_ERR "unmap_vmas: after unmap_single_vma, [%lx, %lx]\n", start, end);
+        //     pgtbl_debug();
+        // }
 	} while (vma && likely(!xa_is_zero(vma)));
 	mmu_notifier_invalidate_range_end(&range);
 }

@@ -61,8 +61,12 @@ enum sbi_ext_nacc_fid {
 	SBI_EXT_NACC_REGISTER = 0x0,
     SBI_EXT_NACC_INVOKE = 0x1,
     SBI_EXT_NACC_RECLAIM_PTP = 0x2,
+    SBI_EXT_NACC_RECLAIM_AGENT_REGION = 0x3,
 
     SBI_EXT_LINUX_VERIFY = 0x4,
+
+
+    SBI_EXT_LINUX_DEBUG = 0x999
 };
 
 enum sbi_ext_time_fid {

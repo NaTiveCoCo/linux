@@ -1918,6 +1918,10 @@ EXPORT_SYMBOL(vm_brk_flags);
 /* Release all mmaps. */
 void exit_mmap(struct mm_struct *mm)
 {
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
+        pgtbl_debug(virt_to_phys(mm->pgd));
+    }
+
 	struct mmu_gather tlb;
 	struct vm_area_struct *vma;
 	unsigned long nr_accounted = 0;
@@ -1944,6 +1948,10 @@ void exit_mmap(struct mm_struct *mm)
 	/* update_hiwater_rss(mm) here? but nobody should be looking */
 	/* Use ULONG_MAX here to ensure all VMAs in the mm are unmapped */
 	unmap_vmas(&tlb, &vmi.mas, vma, 0, ULONG_MAX, ULONG_MAX, false);
+    if(current->thread.nacc_flag & NACC_RECLAIM) {
+        printk(KERN_ERR "[Linux] after unmap_vmas \n");
+        pgtbl_debug(virt_to_phys(mm->pgd));
+    }
 	mmap_read_unlock(mm);
 
 	/*
@@ -1958,6 +1966,7 @@ void exit_mmap(struct mm_struct *mm)
 		      USER_PGTABLES_CEILING, true);
     if(current->thread.nacc_flag & NACC_RECLAIM) {
         flush_reclaim_list();
+        pgtbl_debug(virt_to_phys(mm->pgd));
     }
     tlb_finish_mmu(&tlb);
 

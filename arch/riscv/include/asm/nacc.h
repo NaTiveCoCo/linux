@@ -19,6 +19,8 @@ void flush_reclaim_list(void);
 
 void nacc_invoke(void);
 
+void pgtbl_debug(unsigned long pgd);
+
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

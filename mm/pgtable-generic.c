@@ -344,9 +344,14 @@ pte_t *pte_offset_map_nolock(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte;
 
 	pte = __pte_offset_map(pmd, addr, &pmdval);
-	if (likely(pte))
-		*ptlp = pte_lockptr(mm, &pmdval);
-	return pte;
+	if (likely(pte)) {
+        if (current->thread.nacc_flag & NACC_INITED) {
+            *ptlp = pte_lockptr_nacc(mm, &pmdval);
+        } else {
+		    *ptlp = pte_lockptr(mm, &pmdval);
+        }
+    }
+    return pte;
 }
 
 /*
@@ -401,16 +406,18 @@ pte_t *__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte;
 again:
 #ifdef CONFIG_RISCV
-	if (unlikely(current->thread.nacc_flag & NACC_RECLAIM)) {
-        /* Find the corresponding old PTP. */
-        pte = __pte_offset_map_nacc(pmd, addr, &pmdval);
-        /* */
-		ptl = pte_lockptr_nacc(mm, &pmdval);
-        goto setlock;
-    } else if (unlikely(current->thread.nacc_flag & NACC_INITED)) {
+	//  || current->thread.nacc_flag & NACC_RECLAIM
+    // if (unlikely(current->thread.nacc_flag & NACC_RECLAIM)) {
+    //     /* Find the corresponding old PTP. */
+    //     pte = __pte_offset_map_nacc(pmd, addr, &pmdval);
+    //     /* */
+	// 	ptl = pte_lockptr_nacc(mm, &pmdval);
+    //     goto setlock;
+    // } else 
+    if (unlikely(current->thread.nacc_flag & NACC_INITED || current->thread.nacc_flag & NACC_RECLAIM)) {
         /* Normally go through the page table walk process. */
         pte = __pte_offset_map(pmd, addr, &pmdval);
-        /* However, try to seize the another lock if it has. */
+        /* However, try to seize the old lock if it has. */
         ptl = pte_lockptr_nacc(mm, &pmdval);
         goto setlock;
     }

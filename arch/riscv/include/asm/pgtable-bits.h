@@ -20,6 +20,8 @@
 
 #define _PAGE_SPECIAL   (1 << 8)    /* RSW: 0x1 */
 #define _PAGE_DEVMAP    (1 << 9)    /* RSW, devmap */
+
+#define _PAGE_NEW       (1UL << 54)   /* Reserved bit, used to distinguish new pages */
 #define _PAGE_TABLE     _PAGE_PRESENT
 
 /*

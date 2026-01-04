@@ -290,7 +290,6 @@ static inline void pmd_clear_nacc(pmd_t *pmdp)
 	unsigned long old_pmdp = (unsigned long) pfn_to_virt(old_pfn) + ((unsigned long)pmdp & (PAGE_SIZE - 1));
 	printk(KERN_ERR "[pmd_clear_nacc]: old_pmdp: %lx\n", old_pmdp);
 
-    // add old pmdp's pfn to reclaim list
     add_to_reclaim_list(__page_val_to_pfn(pmd_val(*pmdp)));
 	set_pmd((pmd_t *)old_pmdp, __pmd(0));
 }
@@ -426,6 +425,11 @@ static inline int pte_present(pte_t pte)
 	return (pte_val(pte) & (_PAGE_PRESENT | _PAGE_PROT_NONE));
 }
 
+static inline int pte_new(pte_t pte)
+{
+    return (pte_val(pte) & _PAGE_NEW) != 0;
+    
+}
 #define pte_accessible pte_accessible
 static inline unsigned long pte_accessible(struct mm_struct *mm, pte_t a)
 {
