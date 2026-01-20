@@ -47,3 +47,24 @@ void pgtbl_debug(unsigned long pgd)
               pgd, 0,
               0, 0, 0, 0);
 }
+
+unsigned long page_nacc_mappings(unsigned long pfn)
+{
+	unsigned long actual_pfn = 0;
+	if(pfn >= NACC_PTP_PFN_BASE && pfn < NACC_PTP_PFN_END) {
+		actual_pfn = *((unsigned long *)(nacc_mappings_virt + ((pfn - NACC_PTP_PFN_BASE) << 4)));
+        if(!actual_pfn) {
+            printk(KERN_ERR "[page_nacc_mappings]: newly allocated and will be registered. \n");
+            actual_pfn = pfn;
+            /* Set it to mark it as newly allocated if actual_pfn is equal to pfn. */
+            *((unsigned long *)(nacc_mappings_virt + ((pfn - NACC_PTP_PFN_BASE) << 4))) = pfn;
+            pagetable_pte_ctor(page_ptdesc(pfn_to_page(pfn)));
+        }
+        printk(KERN_ERR "[page_nacc_mappings]: already allocated and registered. \n");
+	} else {
+		actual_pfn = pfn;
+	}
+	return actual_pfn;
+}
+
+EXPORT_SYMBOL(page_nacc_mappings);

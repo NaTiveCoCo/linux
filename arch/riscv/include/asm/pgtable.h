@@ -260,16 +260,7 @@ static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 extern unsigned long nacc_mappings_virt;
 
 
-static inline unsigned long page_nacc_mappings(unsigned long pfn)
-{
-	unsigned long actual_pfn = 0;
-	if(pfn >= NACC_PTP_PFN_BASE && pfn < NACC_PTP_PFN_END) {
-		actual_pfn = *((unsigned long *)(nacc_mappings_virt + ((pfn - NACC_PTP_PFN_BASE) << 4)));
-	} else {
-		actual_pfn = pfn;
-	}
-	return actual_pfn;
-}
+extern unsigned long page_nacc_mappings(unsigned long pfn);
 
 
 static inline void pmd_clear_nacc(pmd_t *pmdp)
@@ -341,6 +332,8 @@ static inline struct page *pmd_page_nacc(pmd_t pmd)
 {
     unsigned long actual_pfn;
 	actual_pfn = pmd_page_nacc_mappings(pmd);
+    printk(KERN_ERR "[pmd_page_nacc]: pfn: %lx actual_pfn: %lx\n", __page_val_to_pfn(pmd_val(pmd)), actual_pfn);
+
     return pfn_to_page(actual_pfn);
 }
 
@@ -676,7 +669,9 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
-
+    if(current->thread.nacc_flag & NACC_INITED) {
+        printk(KERN_ERR "[ptep_get_and_clear]: address: %lx, pte: %lx\n", address, pte_val(pte));   
+    }
 	page_table_check_pte_clear(mm, pte);
 
 	return pte;

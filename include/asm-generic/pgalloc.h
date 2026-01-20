@@ -7,6 +7,10 @@
 #define GFP_PGTABLE_KERNEL	(GFP_KERNEL | __GFP_ZERO)
 #define GFP_PGTABLE_USER	(GFP_PGTABLE_KERNEL | __GFP_ACCOUNT)
 
+#include <asm/sbi.h>
+
+extern unsigned long nacc_mappings_virt;
+
 /**
  * __pte_alloc_one_kernel - allocate memory for a PTE-level kernel page table
  * @mm: the mm_struct of the current context
@@ -66,10 +70,23 @@ static inline void pte_free_kernel(struct mm_struct *mm, pte_t *pte)
 static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 {
 	struct ptdesc *ptdesc;
+    unsigned long new_pte_pfn = 0;
+    if (current->thread.nacc_flag & NACC_INITED) {
+        unsigned long *new_pte_pfn_buf = kmalloc(sizeof(unsigned long), GFP_KERNEL);
+        printk(KERN_ERR "[__pte_alloc] request pmd for address space, position: %lx\n", (unsigned long) virt_to_phys(new_pte_pfn_buf));
+        sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP, virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
+        new_pte_pfn = (*new_pte_pfn_buf) >> 12;
+        kfree(new_pte_pfn_buf);
+        printk(KERN_ERR "[__pte_alloc] new_pmd_pfn = %lx\n", new_pte_pfn);
+        *((unsigned long *)(nacc_mappings_virt + ((new_pte_pfn - NACC_PTP_PFN_BASE) << 4))) = new_pte_pfn;
+        ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
+        goto after_pte_alloc;
+    }
 
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
+after_pte_alloc:
 	if (!pagetable_pte_ctor(ptdesc)) {
 		pagetable_free(ptdesc);
 		return NULL;
@@ -135,10 +152,29 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 
 	if (mm == &init_mm)
 		gfp = GFP_PGTABLE_KERNEL;
+
+    unsigned long new_pmd_pfn = 0;
+        
+    if (current->thread.nacc_flag & NACC_INITED) {
+        if (addr < 0x4000000000) {
+            unsigned long *new_pte_pfn_buf = kmalloc(sizeof(unsigned long), GFP_KERNEL);
+            printk(KERN_ERR "[__pmd_alloc] request pmd for address space, position: %lx\n", (unsigned long) virt_to_phys(new_pte_pfn_buf));
+            sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP, virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
+            new_pmd_pfn = (*new_pte_pfn_buf) >> 12;
+            kfree(new_pte_pfn_buf);
+            printk(KERN_ERR "[__pmd_alloc] new_pmd_pfn = %lx\n", new_pmd_pfn);
+            *((unsigned long *)(nacc_mappings_virt + ((new_pmd_pfn - NACC_PTP_PFN_BASE) << 4))) = new_pmd_pfn;
+            ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
+            goto after_pmd_alloc;
+        }
+    }
+
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
-	if (!pagetable_pmd_ctor(ptdesc)) {
+
+after_pmd_alloc:
+    if (!pagetable_pmd_ctor(ptdesc)) {
 		pagetable_free(ptdesc);
 		return NULL;
 	}

@@ -211,6 +211,9 @@ static int __init early_mem(char *p)
 }
 early_param("mem", early_mem);
 
+#define NACC_PTP_BASE       0x1b0000000
+#define NACC_PTP_SIZE	    0x10000000
+
 static void __init parse_memmap_one(char *p)
 {
 	char *oldp;
@@ -232,7 +235,7 @@ static void __init parse_memmap_one(char *p)
 
 	case '$':
 		start_at = memparse(p + 1, &p);
-        memblock_add(start_at, mem_size);
+        // memblock_add(start_at, mem_size);
 		memblock_reserve(start_at, mem_size);
 		// memblock_mark_nomap(start_at,  mem_size);
 		break;
@@ -259,6 +262,31 @@ static int __init parse_memmap_opt(char *str)
 }
 early_param("memmap", parse_memmap_opt);
 
+
+// static int __init init_reserved_page_tables(void)
+// {
+//     unsigned long pfn, end_pfn;
+//     struct page *page;
+//     struct ptdesc *ptdesc;
+
+//     pfn = PFN_DOWN(NACC_PTP_BASE);
+//     end_pfn = PFN_DOWN(NACC_PTP_BASE + NACC_PTP_SIZE);
+
+//     pr_info("[Linux] Initializing reserved page tables: PFN 0x%lx - 0x%lx\n", pfn, end_pfn);
+
+//     for (; pfn < end_pfn; pfn++) {
+//         page = pfn_to_page(pfn);
+//         ptdesc = page_ptdesc(page);
+
+//         if (!pagetable_pte_ctor(ptdesc)) {
+//             pr_err("Failed to initialize reserved PTE page at pfn %lx\n", pfn);
+//         }
+//     }
+    
+//     return 0;
+// }
+
+// device_initcall(init_reserved_page_tables);
 
 static void __init setup_bootmem(void)
 {

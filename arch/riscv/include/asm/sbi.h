@@ -64,7 +64,7 @@ enum sbi_ext_nacc_fid {
     SBI_EXT_NACC_RECLAIM_AGENT_REGION = 0x3,
 
     SBI_EXT_LINUX_VERIFY = 0x4,
-
+    SBI_EXT_LINUX_REQ_PTP = 0x5,
 
     SBI_EXT_LINUX_DEBUG = 0x999
 };

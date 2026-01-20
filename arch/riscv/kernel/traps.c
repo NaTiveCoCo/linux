@@ -423,7 +423,7 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 		// printk(KERN_ERR "[Linux]: 'do_page_fault' t6 (x31): 0x%lx\n", regs->t6);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' status: 0x%lx\n", regs->status);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr: 0x%lx\n", regs->badaddr);
-        printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr vpn[2]: %ld vpn[1]: %ld vpn[0]: %ld\n", (regs->badaddr) >> 30,  (regs->badaddr >> 21) & 0x1FF, (regs->badaddr >> 12) & 0x1FF);
+        printk(KERN_ERR "[Linux]: 'do_page_fault' badaddr vpn[2]: %ld vpn[1]: %ld vpn[0]: %ld\n", (regs->badaddr >> 30) & 0x1FF, (regs->badaddr >> 21) & 0x1FF, (regs->badaddr >> 12) & 0x1FF);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' cause: 0x%lx\n", regs->cause);
 		printk(KERN_ERR "[Linux]: 'do_page_fault' orig_a0: 0x%lx\n", regs->orig_a0);
 	}

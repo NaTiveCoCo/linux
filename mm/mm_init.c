@@ -880,6 +880,9 @@ void __meminit memmap_init_range(unsigned long size, int nid, unsigned long zone
 		 * There can be holes in boot-time mem_map[]s handed to this
 		 * function.  They do not exist on hotplugged memory.
 		 */
+        if (pfn == 0x1b0000) {
+            pr_info("checkpoint\n");
+        }
 		if (context == MEMINIT_EARLY) {
 			if (overlap_memmap_init(zone, &pfn))
 				continue;
@@ -943,9 +946,10 @@ static void __init memmap_init(void)
 	unsigned long hole_pfn = 0;
 	int i, j, zone_id = 0, nid;
 
+    pr_info("Memmap init: zone ranges:\n");
 	for_each_mem_pfn_range(i, MAX_NUMNODES, &start_pfn, &end_pfn, &nid) {
 		struct pglist_data *node = NODE_DATA(nid);
-
+        pr_info("Memmap init: start_pfn: end_pfn: [%lu - %lu]\n", start_pfn, end_pfn);
 		for (j = 0; j < MAX_NR_ZONES; j++) {
 			struct zone *zone = node->node_zones + j;
 
@@ -957,7 +961,7 @@ static void __init memmap_init(void)
 			zone_id = j;
 		}
 	}
-
+    pr_info("Memmap init: hole_pfn: %lu\n", hole_pfn);
 #ifdef CONFIG_SPARSEMEM
 	/*
 	 * Initialize the memory map for hole in the range [memory_end,

@@ -21,6 +21,9 @@ void nacc_invoke(void);
 
 void pgtbl_debug(unsigned long pgd);
 
+
+unsigned long page_nacc_mappings(unsigned long pfn);
+
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
