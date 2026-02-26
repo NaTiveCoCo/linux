@@ -201,11 +201,20 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
         // and recliam the new pfn (pte)
 		pmd_clear_nacc(pmd);
 		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
+
+		if (page_to_pfn(token) >= NACC_PTP_PFN_BASE
+		    && page_to_pfn(token) < NACC_PTP_PFN_END) {
+			/* Pure NACC PTE page: only do dtor cleanup, skip buddy free */
+			pagetable_pte_dtor(page_ptdesc(token));
+		} else {
+			/* Old buddy page: normal buddy free */
+			pte_free_tlb(tlb, token, addr);
+		}
 	} else {
 		token = pmd_pgtable(*pmd);
 		pmd_clear(pmd);
+		pte_free_tlb(tlb, token, addr);
 	}
-	pte_free_tlb(tlb, token, addr);
 	mm_dec_nr_ptes(tlb->mm);
 }
  

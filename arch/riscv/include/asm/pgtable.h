@@ -267,8 +267,12 @@ static inline void pmd_clear_nacc(pmd_t *pmdp)
 {
 	unsigned long new_pfn = virt_to_pfn((unsigned long)pmdp);
 	unsigned long old_pfn = page_nacc_mappings(new_pfn);
-    
+    printk(KERN_ERR "[pmd_clear_nacc]: new_pfn: %lx, old_pfn: %lx\n", new_pfn, old_pfn);
     if(old_pfn == new_pfn) {
+        unsigned long pte_pfn = __page_val_to_pfn(pmd_val(*pmdp));
+        if (pte_pfn >= NACC_PTP_PFN_BASE && pte_pfn < NACC_PTP_PFN_END) {
+            add_to_reclaim_list(pte_pfn);
+        }
         set_pmd(pmdp, __pmd(0));
         return;
     }
