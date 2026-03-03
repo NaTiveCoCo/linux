@@ -104,6 +104,7 @@ struct thread_struct {
 
     /* Nacc process flag, nacc process will be handled differently */
     unsigned long nacc_flag;
+    unsigned long nacc_cid;
 
 	unsigned long bad_cause;
 	u32 riscv_v_flags;

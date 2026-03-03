@@ -236,6 +236,15 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 		childregs->a0 = 0; /* Return value of fork() */
 		p->thread.s[0] = 0;
 	}
+	/*
+	 * First try fork + exec.
+	 * Only set NACC_FORKED when parent is a NaCC-inited process.
+	 */
+	if (current->thread.nacc_flag & NACC_INITED)
+		p->thread.nacc_flag = NACC_FORKED;
+	else
+		p->thread.nacc_flag = 0;
+
 	p->thread.riscv_v_flags = 0;
 	if (has_vector())
 		riscv_v_thread_alloc(p);

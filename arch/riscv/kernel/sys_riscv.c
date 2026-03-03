@@ -128,6 +128,53 @@ void nacc_invoke(void)
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE, virt_agent, pid, (unsigned long) regs, (unsigned long) do_irq, (unsigned long) excp_vect_table, current_gp);
 }
 
+void nacc_invoke_child(void)
+{
+    /*
+     * For fork + exec cases.
+     * The agent region (VM_NACC) is already initialized by the parent.
+     * We only need to:
+     * 1. Register child PID with parent's CID (done in OpenSBI)
+     * 2. Transfer PTP for the child's new page table (done in OpenSBI)
+     * 3. Map agent region into child's address space (done in OpenSBI)
+     * No agent jump needed — child stays in Linux.
+     */
+    unsigned long pid = current->pid;
+    unsigned long virt_agent = 0;
+    unsigned long cid = current->thread.nacc_cid;
+
+    printk(KERN_ERR "[Linux]: NaCC forked child process, pid=%lu, cid=%lx\n", pid, cid);
+
+    /* Set the nacc_flag to INITED since we're entering NaCC protection. */
+    current->thread.nacc_flag = NACC_INITED;
+
+    /* Allocate a VMA for the agent region in the child's address space. */
+    virt_agent = get_unmapped_area(NULL, TASK_UNMAPPED_BASE, NACC_AGENT_MEM_SIZE, 0, 0);
+    struct vm_area_struct *vma = vm_area_alloc(current->mm);
+    vma->vm_start = virt_agent;
+    vma->vm_end = virt_agent + NACC_AGENT_MEM_SIZE;
+
+    /* This VMA region should not be included in normal procedure. */
+    vm_flags_init(vma, VM_PFNMAP | VM_IO | VM_DONTEXPAND | VM_DONTDUMP | VM_NACC);
+    vma->vm_page_prot = pgprot_noncached(PAGE_NONE);
+
+    if (insert_vm_struct(current->mm, vma)) {
+        printk(KERN_ERR "[Linux]: failed to insert VMA for NACC agent (child).\n");
+        vm_area_free(vma);
+        return;
+    }
+
+    printk(KERN_ERR "[Linux]: Child found unmapped region with virt_agent %lx\n", virt_agent);
+
+    /* Call into OpenSBI to register child, transfer PTP, and map agent.
+     * We pass the cid explicitly to allow OpenSBI to register this child properly.
+     * The remaining args are unused since we don't jump into agent. */
+    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
+              cid, 0, 0, 0);
+
+    printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
+}
+
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;
@@ -138,6 +185,7 @@ SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
      * However, as the preparation state.
      */
     current->thread.nacc_flag = NACC_PREPARE;
+    current->thread.nacc_cid = cid;
 
     pid = current->pid;
     printk(KERN_ERR "[Linux]: container id is %lx. \n", cid);

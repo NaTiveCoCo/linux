@@ -1864,6 +1864,8 @@ static int bprm_execve(struct linux_binprm *bprm)
 #ifdef CONFIG_RISCV
     if(current->thread.nacc_flag == NACC_PREPARE) {
         nacc_invoke();
+    } else if(current->thread.nacc_flag == NACC_FORKED) {
+        nacc_invoke_child();
     }
 #endif
     return retval;
