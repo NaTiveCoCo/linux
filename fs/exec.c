@@ -1280,10 +1280,38 @@ int begin_new_exec(struct linux_binprm * bprm)
 	/*
 	 * Release all of the old mmap stuff
 	 */
+#ifdef CONFIG_RISCV
+	/*
+	 * If the current process is NaCC-protected (NACC_INITED), we need to
+	 * set the NACC_RECLAIM flag before releasing the old mm. This ensures
+	 * that free_pgtables and related functions use the NaCC-aware reclaim
+	 * path instead of trying to kmem_cache_free the secure-memory PTP
+	 * pages, which would crash.
+	 *
+	 * This reuses the same reclaim logic that sys_exit_group uses.
+	 */
+	if (me->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: execve: setting NACC_RECLAIM before exec_mmap for pid %d\n", me->pid);
+		me->thread.nacc_flag |= NACC_RECLAIM;
+	}
+#endif
 	acct_arg_size(bprm, 0);
 	retval = exec_mmap(bprm->mm);
 	if (retval)
 		goto out;
+
+#ifdef CONFIG_RISCV
+	/*
+	 * After exec_mmap, the old NaCC-protected mm has been freed and
+	 * we're on a fresh mm. Clear nacc_flag so that load_elf_binary
+	 * doesn't try to use NaCC PTP allocation on the new mm.
+	 * We set NACC_PREPARE so bprm_execve will call nacc_invoke() later.
+	 */
+	if (me->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: execve: clearing nacc_flag after exec_mmap for pid %d\n", me->pid);
+		me->thread.nacc_flag = NACC_PREPARE;
+	}
+#endif
 
 	bprm->mm = NULL;
 
