@@ -6,6 +6,7 @@
  */
 
 #include <linux/syscalls.h>
+#include <linux/errno.h>
 #include <asm/cacheflush.h>
 
 #include <asm/sbi.h>
@@ -21,6 +22,7 @@
 #define NACC_MAPPINGS_SIZE 0x100000
 
 #define NACC_AGENT_MEM_SIZE        0x20000000
+#define NACC_FORK_PTP_LIST_PAGES   2
 
 extern unsigned long nacc_mappings_virt;
 
@@ -175,15 +177,49 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
-void nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa)
+int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa)
 {
+    unsigned long ptp_list_bytes = PAGE_SIZE * NACC_FORK_PTP_LIST_PAGES;
+    struct nacc_fork_ptp_list *ptp_list;
+    unsigned long capacity;
+    struct sbiret ret;
+    int rc;
+
     printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx\n",
            parent_pgd_pa, child_pgd_pa);
 
-    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK, parent_pgd_pa, child_pgd_pa,
-              0, 0, 0, 0);
+    ptp_list = kzalloc(ptp_list_bytes, GFP_KERNEL);
+    if (!ptp_list)
+        return -ENOMEM;
+
+    capacity = (ptp_list_bytes - sizeof(*ptp_list)) /
+               sizeof(ptp_list->entries[0]);
+
+    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK, parent_pgd_pa,
+                    child_pgd_pa, virt_to_phys(ptp_list), ptp_list_bytes,
+                    0, 0);
+    if (ret.error) {
+        printk(KERN_ERR "[Linux]: nacc_fork failed: sbi error=%ld value=%ld\n",
+               ret.error, ret.value);
+        kfree(ptp_list);
+        return -EIO;
+    }
+
+    rc = nacc_register_fork_ptp_list(ptp_list, ptp_list_bytes);
+    if (rc) {
+        printk(KERN_ERR "[Linux]: nacc_fork ptp_list register failed: %d "
+               "(nr=%u cap=%lu)\n",
+               rc, ptp_list->nr_entries, capacity);
+        kfree(ptp_list);
+        return rc;
+    }
+
+    printk(KERN_ERR "[Linux]: nacc_fork ptp_list entries=%u\n",
+           ptp_list->nr_entries);
+    kfree(ptp_list);
 
     printk(KERN_ERR "[Linux]: nacc_fork done.\n");
+    return 0;
 }
 
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)

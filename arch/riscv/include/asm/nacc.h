@@ -20,6 +20,26 @@ struct nacc_reclaim_list {
  */
 #define NACC_FORKED      0b1000
 
+#define NACC_FORK_PTP_LEVEL_MASK	0x3UL
+#define NACC_FORK_PTP_ENCODE(new_pfn, level) \
+	((((unsigned long)(new_pfn)) << 2) | \
+	 ((unsigned long)(level) & NACC_FORK_PTP_LEVEL_MASK))
+#define NACC_FORK_PTP_DECODE_PFN(entry)	((unsigned long)(entry) >> 2)
+#define NACC_FORK_PTP_DECODE_LEVEL(entry) \
+	((unsigned int)((entry) & NACC_FORK_PTP_LEVEL_MASK))
+
+/*
+ * NaCC fork PTP list:
+ * OpenSBI fills child-owned non-leaf page-table pages that Linux must
+ * register with the proper pagetable ctor. Each list element is a packed
+ * 64-bit value holding new_pfn and level.
+ */
+struct nacc_fork_ptp_list {
+	unsigned int nr_entries;
+	unsigned int reserved;
+	unsigned long entries[];
+};
+
 void add_to_reclaim_list(unsigned long pfn);
 void flush_reclaim_list(void);
 
@@ -31,7 +51,10 @@ void pgtbl_debug(unsigned long pgd);
 
 unsigned long page_nacc_mappings(unsigned long pfn);
 
-void nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa);
+int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
+				unsigned long ptp_list_bytes);
+
+int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

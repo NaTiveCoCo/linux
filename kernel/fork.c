@@ -794,7 +794,7 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 		printk(KERN_ERR "[Linux]: dup_mmap: calling nacc_fork "
 		       "parent_pgd_pa=%lx child_pgd_pa=%lx\n",
 		       parent_pgd_pa, child_pgd_pa);
-		nacc_fork(parent_pgd_pa, child_pgd_pa);
+		retval = nacc_fork(parent_pgd_pa, child_pgd_pa);
 	}
 #endif
 
