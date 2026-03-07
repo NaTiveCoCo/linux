@@ -113,6 +113,11 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#include <asm/sbi.h>
+#endif
+
 #include <trace/events/sched.h>
 
 #define CREATE_TRACE_POINTS
@@ -633,6 +638,9 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	unsigned long charge = 0;
 	LIST_HEAD(uf);
 	VMA_ITERATOR(vmi, mm, 0);
+#ifdef CONFIG_RISCV
+	int nacc_skip_copy_page_range = 0;
+#endif
 
 	uprobe_start_dup_mmap();
 	if (mmap_write_lock_killable(oldmm)) {
@@ -658,6 +666,23 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	retval = __mt_dup(&oldmm->mm_mt, &mm->mm_mt, GFP_KERNEL);
 	if (unlikely(retval))
 		goto out;
+
+#ifdef CONFIG_RISCV
+	/*
+	 * NaCC fork bypass: If the parent is a NaCC-protected process,
+	 * its PTP pages are in secure memory and cannot be accessed from
+	 * S-Mode. We let the VMA/maple-tree metadata copy proceed normally
+	 * (it only touches mm/VMA structs, not page tables), but skip
+	 * copy_page_range() for each VMA. Instead, we delegate the entire
+	 * page table copy to OpenSBI via SBI ecall (M-Mode can access
+	 * secure memory).
+	 */
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: dup_mmap: NaCC parent (pid %d), "
+		       "will skip copy_page_range for child\n", current->pid);
+		nacc_skip_copy_page_range = 1;
+	}
+#endif
 
 	mt_clear_in_rcu(vmi.mas.tree);
 	for_each_vma(vmi, mpnt) {
@@ -742,8 +767,12 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 			i_mmap_unlock_write(mapping);
 		}
 
-		if (!(tmp->vm_flags & VM_WIPEONFORK))
-			retval = copy_page_range(tmp, mpnt);
+		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
+#ifdef CONFIG_RISCV
+			if (!nacc_skip_copy_page_range)
+#endif
+				retval = copy_page_range(tmp, mpnt);
+		}
 
 		if (retval) {
 			mpnt = vma_next(&vmi);
@@ -752,6 +781,23 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	}
 	/* a new mm has just been created */
 	retval = arch_dup_mmap(oldmm, mm);
+
+#ifdef CONFIG_RISCV
+	/*
+	 * NaCC fork: After VMA metadata is fully copied, delegate the
+	 * page table tree copy to OpenSBI (M-Mode). Pass the physical
+	 * addresses of parent and child PGDs.
+	 */
+	if (nacc_skip_copy_page_range && !retval) {
+		unsigned long parent_pgd_pa = virt_to_phys(oldmm->pgd);
+		unsigned long child_pgd_pa = virt_to_phys(mm->pgd);
+		printk(KERN_ERR "[Linux]: dup_mmap: calling nacc_fork "
+		       "parent_pgd_pa=%lx child_pgd_pa=%lx\n",
+		       parent_pgd_pa, child_pgd_pa);
+		nacc_fork(parent_pgd_pa, child_pgd_pa);
+	}
+#endif
+
 loop_out:
 	vma_iter_free(&vmi);
 	if (!retval) {

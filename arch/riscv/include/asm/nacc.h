@@ -31,6 +31,7 @@ void pgtbl_debug(unsigned long pgd);
 
 unsigned long page_nacc_mappings(unsigned long pfn);
 
+void nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

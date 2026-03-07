@@ -175,6 +175,17 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
+void nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa)
+{
+    printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx\n",
+           parent_pgd_pa, child_pgd_pa);
+
+    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK, parent_pgd_pa, child_pgd_pa,
+              0, 0, 0, 0);
+
+    printk(KERN_ERR "[Linux]: nacc_fork done.\n");
+}
+
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;
