@@ -398,6 +398,17 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (err)
 		goto err;
 
+#ifdef CONFIG_RISCV
+	if (current->thread.nacc_flag == NACC_PREPARE ||
+	    current->thread.nacc_flag == NACC_INITED ||
+	    current->thread.nacc_flag == NACC_FORKED ||
+	    current->thread.nacc_flag == NACC_REEXEC) {
+		err = nacc_reserve_agent_slot_mm(mm, "bprm_mm_init");
+		if (err)
+			goto err;
+	}
+#endif
+
 	return 0;
 
 err:
@@ -1301,17 +1312,18 @@ int begin_new_exec(struct linux_binprm * bprm)
 		goto out;
 
 #ifdef CONFIG_RISCV
-	/*
-	 * After exec_mmap, the old NaCC-protected mm has been freed and
-	 * we're on a fresh mm. Clear nacc_flag so that load_elf_binary
-	 * doesn't try to use NaCC PTP allocation on the new mm.
-	 * We set NACC_PREPARE so bprm_execve will call nacc_invoke() later.
-	 */
-	if (me->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: execve: clearing nacc_flag after exec_mmap for pid %d\n", me->pid);
-		me->thread.nacc_flag = NACC_PREPARE;
-	}
-#endif
+		/*
+		 * After exec_mmap, the old NaCC-protected mm has been freed and
+		 * we're on a fresh mm. Same-PID re-exec must be handled
+		 * separately from fork child re-attach because the new exec image
+		 * needs a refreshed agent/Linux trap context.
+		 */
+		if (me->thread.nacc_flag & NACC_INITED) {
+			printk(KERN_ERR "[Linux]: execve: switch nacc_flag to NACC_REEXEC after exec_mmap for pid %d\n",
+			       me->pid);
+			me->thread.nacc_flag = NACC_REEXEC;
+		}
+	#endif
 
 	bprm->mm = NULL;
 
@@ -1890,12 +1902,14 @@ static int bprm_execve(struct linux_binprm *bprm)
 	acct_update_integrals(current);
 	task_numa_free(current, false);
 #ifdef CONFIG_RISCV
-    if(current->thread.nacc_flag == NACC_PREPARE) {
-        nacc_invoke();
-    } else if(current->thread.nacc_flag == NACC_FORKED) {
-        nacc_invoke_child();
-    }
-#endif
+	if (current->thread.nacc_flag == NACC_PREPARE) {
+		nacc_invoke();
+	} else if (current->thread.nacc_flag == NACC_FORKED) {
+		nacc_invoke_child();
+	} else if (current->thread.nacc_flag == NACC_REEXEC) {
+		nacc_reexec();
+	}
+	#endif
     return retval;
 
 out:

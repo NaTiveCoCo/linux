@@ -1781,11 +1781,8 @@ after_zap_present:
 	if (force_flush)
 		tlb_flush_mmu(tlb);
 
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
+	if (current->thread.nacc_flag & NACC_RECLAIM)
 		printk(KERN_ERR "zap_pte_range: end\n");
-        if (pte_user(ptep_get(pte)))
-            pgtbl_debug(virt_to_phys(mm->pgd));
-    }
 	return addr;
 }
 
@@ -1911,20 +1908,22 @@ void unmap_page_range(struct mmu_gather *tlb,
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
-	if (current->thread.nacc_flag & NACC_RECLAIM) {
-        if (vma->vm_flags & VM_NACC) {
-            printk(KERN_ERR "  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n", vma->vm_start, vma->vm_end);
-            pgtbl_debug(virt_to_phys(tlb->mm->pgd));
-            sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_AGENT_REGION, vma->vm_start, vma->vm_end, virt_to_phys(tlb->mm->pgd), 0, 0, 0);
-        }
+	if ((current->thread.nacc_flag & NACC_RECLAIM) &&
+	    (vma->vm_flags & VM_NACC)) {
+		printk(KERN_ERR "  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
+		       vma->vm_start, vma->vm_end);
+		pgtbl_debug(virt_to_phys(tlb->mm->pgd));
+		sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_AGENT_REGION,
+			  vma->vm_start, vma->vm_end, virt_to_phys(tlb->mm->pgd),
+			  0, 0, 0);
 	} else {
-        do {
-            next = pgd_addr_end(addr, end);
-            if (pgd_none_or_clear_bad(pgd))
-                continue;
-            next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
-        } while (pgd++, addr = next, addr != end);
-    }
+		do {
+			next = pgd_addr_end(addr, end);
+			if (pgd_none_or_clear_bad(pgd))
+				continue;
+			next = zap_p4d_range(tlb, vma, pgd, addr, next, details);
+		} while (pgd++, addr = next, addr != end);
+	}
     // if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "unmap_page_range: Before tlb_end_vma\n");
 	// }

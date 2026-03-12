@@ -2,7 +2,10 @@
 #define _ASM_RISCV_NACC_H
 
 #ifndef __ASSEMBLY__
+#include <linux/types.h>
 #define NACC_RECLAIM_LIST_SIZE 511
+
+struct mm_struct;
 
 struct nacc_reclaim_list {
 	unsigned long pfns[NACC_RECLAIM_LIST_SIZE];
@@ -19,6 +22,12 @@ struct nacc_reclaim_list {
  * This flag is set in the child process.
  */
 #define NACC_FORKED      0b1000
+
+/*
+ * Re-exec path on the same PID for an already NaCC-protected task.
+ * Use lightweight re-attach (no agent re-initialization jump).
+ */
+#define NACC_REEXEC      0b10000
 
 #define NACC_FORK_PTP_LEVEL_MASK	0x3UL
 #define NACC_FORK_PTP_ENCODE(new_pfn, level) \
@@ -44,7 +53,9 @@ void add_to_reclaim_list(unsigned long pfn);
 void flush_reclaim_list(void);
 
 void nacc_invoke(void);
+void nacc_reexec(void);
 void nacc_invoke_child(void);
+int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 
 void pgtbl_debug(unsigned long pgd);
 
