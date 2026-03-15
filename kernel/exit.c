@@ -1098,7 +1098,7 @@ SYSCALL_DEFINE1(exit_group, int, error_code)
 {
 #ifdef CONFIG_RISCV
 #include <asm/nacc.h>
-    if(current->thread.nacc_flag & NACC_INITED)
+    if (current->thread.nacc_flag & (NACC_INITED | NACC_FORKED))
         current->thread.nacc_flag |= NACC_RECLAIM;
 #endif
 

@@ -1301,8 +1301,9 @@ int begin_new_exec(struct linux_binprm * bprm)
 	 *
 	 * This reuses the same reclaim logic that sys_exit_group uses.
 	 */
-	if (me->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: execve: setting NACC_RECLAIM before exec_mmap for pid %d\n", me->pid);
+	if (me->thread.nacc_flag & (NACC_INITED | NACC_FORKED)) {
+		printk(KERN_ERR "[Linux]: execve: setting NACC_RECLAIM before exec_mmap for pid %d flag=%lx\n",
+		       me->pid, me->thread.nacc_flag);
 		me->thread.nacc_flag |= NACC_RECLAIM;
 	}
 #endif

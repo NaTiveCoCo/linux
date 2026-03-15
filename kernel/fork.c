@@ -630,6 +630,54 @@ static void dup_mm_exe_file(struct mm_struct *mm, struct mm_struct *oldmm)
 }
 
 #ifdef CONFIG_MMU
+#ifdef CONFIG_RISCV
+static bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
+                                        unsigned long *type)
+{
+       unsigned long filter_type = 0;
+
+       if (vma->vm_flags & VM_DONTCOPY)
+               filter_type |= NACC_FORK_RANGE_DONTCOPY;
+       if (vma->vm_flags & VM_WIPEONFORK)
+               filter_type |= NACC_FORK_RANGE_WIPEONFORK;
+
+       if (!filter_type)
+               return false;
+
+       *type = filter_type;
+       return true;
+}
+
+static struct nacc_fork_filter *nacc_fork_filter_alloc(unsigned int max_ranges)
+{
+       size_t bytes;
+
+       bytes = struct_size((struct nacc_fork_filter *)NULL, ranges, max_ranges);
+       return kzalloc(bytes, GFP_KERNEL);
+}
+
+static int nacc_fork_filter_append(struct nacc_fork_filter *filter,
+                                      unsigned int max_ranges,
+                                      unsigned long start,
+                                      unsigned long end,
+                                      unsigned long type)
+{
+       struct nacc_fork_range *range;
+
+       if (!filter || !type || start >= end)
+               return -EINVAL;
+       if (filter->nr_ranges >= max_ranges)
+               return -EOVERFLOW;
+
+       range = &filter->ranges[filter->nr_ranges++];
+       range->start = start;
+       range->end = end;
+       range->type = type;
+
+       return 0;
+}
+#endif
+
 static __latent_entropy int dup_mmap(struct mm_struct *mm,
 					struct mm_struct *oldmm)
 {
@@ -640,6 +688,8 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	VMA_ITERATOR(vmi, mm, 0);
 #ifdef CONFIG_RISCV
 	int nacc_skip_copy_page_range = 0;
+    struct nacc_fork_filter *nacc_fork_filter = NULL;
+    unsigned int nacc_fork_filter_capacity = 0;
 #endif
 
 	uprobe_start_dup_mmap();
@@ -681,6 +731,12 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 		printk(KERN_ERR "[Linux]: dup_mmap: NaCC parent (pid %d), "
 		       "will skip copy_page_range for child\n", current->pid);
 		nacc_skip_copy_page_range = 1;
+        nacc_fork_filter_capacity = oldmm->map_count ?: 1;
+        nacc_fork_filter = nacc_fork_filter_alloc(nacc_fork_filter_capacity);
+        if (!nacc_fork_filter) {
+                retval = -ENOMEM;
+                goto out;
+        }
 	}
 #endif
 
@@ -689,6 +745,20 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 		struct file *file;
 
 		vma_start_write(mpnt);
+#ifdef CONFIG_RISCV
+        if (nacc_skip_copy_page_range) {
+            unsigned long filter_type;
+
+            if (nacc_fork_vma_needs_filter(mpnt, &filter_type)) {
+                retval = nacc_fork_filter_append(nacc_fork_filter,
+                                            nacc_fork_filter_capacity,
+                                            mpnt->vm_start, mpnt->vm_end,
+                                            filter_type);
+                if (retval)
+                    goto loop_out;
+            }
+        }
+#endif
 		if (mpnt->vm_flags & VM_DONTCOPY) {
 			retval = vma_iter_clear_gfp(&vmi, mpnt->vm_start,
 						    mpnt->vm_end, GFP_KERNEL);
@@ -792,8 +862,9 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 		unsigned long parent_pgd_pa = virt_to_phys(oldmm->pgd);
 		unsigned long child_pgd_pa = virt_to_phys(mm->pgd);
 		printk(KERN_ERR "[Linux]: dup_mmap: calling nacc_fork "
-		       "parent_pgd_pa=%lx child_pgd_pa=%lx\n",
-		       parent_pgd_pa, child_pgd_pa);
+                "parent_pgd_pa=%lx child_pgd_pa=%lx filter_ranges=%u\n",
+                parent_pgd_pa, child_pgd_pa,
+                nacc_fork_filter ? nacc_fork_filter->nr_ranges : 0);
 		retval = nacc_fork(parent_pgd_pa, child_pgd_pa);
 	}
 #endif
@@ -819,6 +890,9 @@ out:
 	mmap_write_unlock(mm);
 	flush_tlb_mm(oldmm);
 	mmap_write_unlock(oldmm);
+#ifdef CONFIG_RISCV
+    kfree(nacc_fork_filter);
+#endif
 	if (!retval)
 		dup_userfaultfd_complete(&uf);
 	else

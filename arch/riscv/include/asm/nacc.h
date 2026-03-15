@@ -49,6 +49,21 @@ struct nacc_fork_ptp_list {
 	unsigned long entries[];
 };
 
+#define NACC_FORK_RANGE_DONTCOPY	0x1UL
+#define NACC_FORK_RANGE_WIPEONFORK	0x2UL
+
+struct nacc_fork_range {
+	unsigned long start;
+	unsigned long end;
+	unsigned long type;
+};
+
+struct nacc_fork_filter {
+	unsigned int nr_ranges;
+	unsigned int reserved;
+	struct nacc_fork_range ranges[];
+};
+
 void add_to_reclaim_list(unsigned long pfn);
 void flush_reclaim_list(void);
 
