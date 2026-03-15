@@ -861,11 +861,20 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	if (nacc_skip_copy_page_range && !retval) {
 		unsigned long parent_pgd_pa = virt_to_phys(oldmm->pgd);
 		unsigned long child_pgd_pa = virt_to_phys(mm->pgd);
+        unsigned long filter_bytes = sizeof(*nacc_fork_filter);
+
+        if (nacc_fork_filter) {
+            filter_bytes = struct_size(nacc_fork_filter, ranges,
+                                         nacc_fork_filter->nr_ranges);
+        }
+     
 		printk(KERN_ERR "[Linux]: dup_mmap: calling nacc_fork "
-                "parent_pgd_pa=%lx child_pgd_pa=%lx filter_ranges=%u\n",
+                "parent_pgd_pa=%lx child_pgd_pa=%lx filter_ranges=%u filter_bytes=%lu\n",
                 parent_pgd_pa, child_pgd_pa,
-                nacc_fork_filter ? nacc_fork_filter->nr_ranges : 0);
-		retval = nacc_fork(parent_pgd_pa, child_pgd_pa);
+                nacc_fork_filter ? nacc_fork_filter->nr_ranges : 0,
+                filter_bytes);
+		retval = nacc_fork(parent_pgd_pa, child_pgd_pa, nacc_fork_filter,
+                           filter_bytes);
 	}
 #endif
 

@@ -80,7 +80,9 @@ unsigned long page_nacc_mappings(unsigned long pfn);
 int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes);
 
-int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa);
+int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
+              struct nacc_fork_filter *filter,
+              unsigned long filter_bytes);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

@@ -312,16 +312,19 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
-int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa)
+int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
+              struct nacc_fork_filter *filter,
+              unsigned long filter_bytes)
 {
     unsigned long ptp_list_bytes = PAGE_SIZE * NACC_FORK_PTP_LIST_PAGES;
     struct nacc_fork_ptp_list *ptp_list;
     unsigned long capacity;
+    unsigned long filter_nr = filter ? filter->nr_ranges : 0;
     struct sbiret ret;
     int rc;
 
-    printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx\n",
-           parent_pgd_pa, child_pgd_pa);
+    printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx filter=%px filter_bytes=%lu filter_nr=%lu\n",
+           parent_pgd_pa, child_pgd_pa, filter, filter_bytes, filter_nr);
 
     ptp_list = kzalloc(ptp_list_bytes, GFP_KERNEL);
     if (!ptp_list)
@@ -332,7 +335,7 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa)
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK, parent_pgd_pa,
                     child_pgd_pa, virt_to_phys(ptp_list), ptp_list_bytes,
-                    0, 0);
+                    filter ? virt_to_phys(filter) : 0, filter_bytes);
     if (ret.error) {
         printk(KERN_ERR "[Linux]: nacc_fork failed: sbi error=%ld value=%ld\n",
                ret.error, ret.value);
