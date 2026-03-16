@@ -1904,12 +1904,20 @@ void unmap_page_range(struct mmu_gather *tlb,
 {
 	pgd_t *pgd;
 	unsigned long next;
+	bool hit_nacc_reclaim;
 
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
-	if ((current->thread.nacc_flag & NACC_RECLAIM) &&
-	    (vma->vm_flags & VM_NACC)) {
+	hit_nacc_reclaim = !!((current->thread.nacc_flag & NACC_RECLAIM) &&
+			       (vma->vm_flags & VM_NACC));
+	if (unlikely(current->thread.nacc_flag || (vma->vm_flags & VM_NACC))) {
+		printk(KERN_ERR "[Linux]: unmap_page_range pid=%d nacc_flag=%lx vma=[%lx,%lx) vm_flags=%lx addr=%lx end=%lx hit_nacc_reclaim=%d\n",
+		       current->pid, current->thread.nacc_flag,
+		       vma->vm_start, vma->vm_end, vma->vm_flags,
+		       addr, end, hit_nacc_reclaim);
+	}
+	if (hit_nacc_reclaim) {
 		printk(KERN_ERR "  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
 		       vma->vm_start, vma->vm_end);
 		pgtbl_debug(virt_to_phys(tlb->mm->pgd));
@@ -1944,6 +1952,13 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	end = min(vma->vm_end, end_addr);
 	if (end <= vma->vm_start)
 		return;
+
+	if (unlikely(current->thread.nacc_flag || (vma->vm_flags & VM_NACC))) {
+		printk(KERN_ERR "[Linux]: unmap_single_vma pid=%d nacc_flag=%lx vma=[%lx,%lx) vm_flags=%lx start=%lx end=%lx vm_nacc=%d\n",
+		       current->pid, current->thread.nacc_flag,
+		       vma->vm_start, vma->vm_end, vma->vm_flags,
+		       start, end, !!(vma->vm_flags & VM_NACC));
+	}
 
 	if (vma->vm_file)
 		uprobe_munmap(vma, start, end);

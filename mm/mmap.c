@@ -1922,6 +1922,11 @@ void exit_mmap(struct mm_struct *mm)
         pgtbl_debug(virt_to_phys(mm->pgd));
     }
 
+    if (unlikely(current->thread.nacc_flag)) {
+        printk(KERN_ERR "[Linux]: exit_mmap pid=%d nacc_flag=%lx mm=%px pgd=%px\n",
+               current->pid, current->thread.nacc_flag, mm, mm->pgd);
+    }
+
 	struct mmu_gather tlb;
 	struct vm_area_struct *vma;
 	unsigned long nr_accounted = 0;
