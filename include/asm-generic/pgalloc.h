@@ -9,8 +9,6 @@
 
 #include <asm/sbi.h>
 
-extern unsigned long nacc_mappings_virt;
-
 /**
  * __pte_alloc_one_kernel - allocate memory for a PTE-level kernel page table
  * @mm: the mm_struct of the current context
@@ -78,15 +76,15 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
         new_pte_pfn = (*new_pte_pfn_buf) >> 12;
         kfree(new_pte_pfn_buf);
         printk(KERN_ERR "[__pte_alloc] new_pmd_pfn = %lx\n", new_pte_pfn);
-        *((unsigned long *)(nacc_mappings_virt + ((new_pte_pfn - NACC_PTP_PFN_BASE) << 4))) = new_pte_pfn;
+        if (page_nacc_register_ptp(new_pte_pfn, 0))
+            return NULL;
         ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
-        goto after_pte_alloc;
+        return ptdesc_page(ptdesc);
     }
 
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
-after_pte_alloc:
 	if (!pagetable_pte_ctor(ptdesc)) {
 		pagetable_free(ptdesc);
 		return NULL;
@@ -162,19 +160,19 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
             sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP, virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
             new_pmd_pfn = (*new_pte_pfn_buf) >> 12;
             kfree(new_pte_pfn_buf);
-            printk(KERN_ERR "[__pmd_alloc] new_pmd_pfn = %lx\n", new_pmd_pfn);
-            *((unsigned long *)(nacc_mappings_virt + ((new_pmd_pfn - NACC_PTP_PFN_BASE) << 4))) = new_pmd_pfn;
-            ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
-            goto after_pmd_alloc;
-        }
+	        printk(KERN_ERR "[__pmd_alloc] new_pmd_pfn = %lx\n", new_pmd_pfn);
+	        if (page_nacc_register_ptp(new_pmd_pfn, 1))
+	                return NULL;
+	        ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
+	        return ptdesc_address(ptdesc);
+	    }
     }
 
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
 		return NULL;
 
-after_pmd_alloc:
-    if (!pagetable_pmd_ctor(ptdesc)) {
+	if (!pagetable_pmd_ctor(ptdesc)) {
 		pagetable_free(ptdesc);
 		return NULL;
 	}

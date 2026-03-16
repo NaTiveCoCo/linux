@@ -77,6 +77,7 @@ void pgtbl_debug(unsigned long pgd);
 
 
 unsigned long page_nacc_mappings(unsigned long pfn);
+int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 
 int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes);
