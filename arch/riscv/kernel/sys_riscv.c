@@ -32,6 +32,17 @@ extern unsigned long nacc_mappings_virt;
 extern char do_irq[];
 extern char excp_vect_table[];
 
+static const char *nacc_fork_filter_type_name(unsigned long type)
+{
+    if (type & NACC_FORK_RANGE_VM_NACC)
+        return "vm_nacc";
+    if (type & NACC_FORK_RANGE_DONTCOPY)
+        return "dontcopy";
+    if (type & NACC_FORK_RANGE_WIPEONFORK)
+        return "wipeonfork";
+    return "unknown";
+}
+
 static unsigned long nacc_fixed_agent_base(void)
 {
     if (TASK_SIZE <= NACC_AGENT_SLOT_SIZE + NACC_AGENT_TOP_GAP)
@@ -325,7 +336,17 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
 
     printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx filter=%px filter_bytes=%lu filter_nr=%lu\n",
            parent_pgd_pa, child_pgd_pa, filter, filter_bytes, filter_nr);
+    if (filter) {
+        unsigned long i;
 
+        for (i = 0; i < filter_nr; i++) {
+            struct nacc_fork_range *range = &filter->ranges[i];
+
+            printk(KERN_ERR "[Linux]: nacc_fork: filter[%lu] %s [%lx, %lx) type=%lx\n",
+                   i, nacc_fork_filter_type_name(range->type),
+                   range->start, range->end, range->type);
+        }
+    }
     ptp_list = kzalloc(ptp_list_bytes, GFP_KERNEL);
     if (!ptp_list)
         return -ENOMEM;

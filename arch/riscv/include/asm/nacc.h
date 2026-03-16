@@ -51,6 +51,7 @@ struct nacc_fork_ptp_list {
 
 #define NACC_FORK_RANGE_DONTCOPY	0x1UL
 #define NACC_FORK_RANGE_WIPEONFORK	0x2UL
+#define NACC_FORK_RANGE_VM_NACC         0x4UL
 
 struct nacc_fork_range {
 	unsigned long start;

@@ -640,6 +640,8 @@ static bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
                filter_type |= NACC_FORK_RANGE_DONTCOPY;
        if (vma->vm_flags & VM_WIPEONFORK)
                filter_type |= NACC_FORK_RANGE_WIPEONFORK;
+       if (vma->vm_flags & VM_NACC)
+               filter_type |= NACC_FORK_RANGE_VM_NACC;
 
        if (!filter_type)
                return false;
@@ -675,6 +677,17 @@ static int nacc_fork_filter_append(struct nacc_fork_filter *filter,
        range->type = type;
 
        return 0;
+}
+
+static const char *nacc_fork_filter_type_name(unsigned long type)
+{
+       if (type & NACC_FORK_RANGE_VM_NACC)
+               return "vm_nacc";
+       if (type & NACC_FORK_RANGE_DONTCOPY)
+               return "dontcopy";
+       if (type & NACC_FORK_RANGE_WIPEONFORK)
+               return "wipeonfork";
+       return "unknown";
 }
 #endif
 
@@ -759,14 +772,17 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
             }
         }
 #endif
-		if (mpnt->vm_flags & VM_DONTCOPY) {
-			retval = vma_iter_clear_gfp(&vmi, mpnt->vm_start,
+            if (mpnt->vm_flags & (VM_DONTCOPY | VM_NACC)) {
+                retval = vma_iter_clear_gfp(&vmi, mpnt->vm_start,
 						    mpnt->vm_end, GFP_KERNEL);
 			if (retval)
 				goto loop_out;
 
 			vm_stat_account(mm, mpnt->vm_flags, -vma_pages(mpnt));
-			continue;
+            if (mpnt->vm_flags & VM_NACC)
+                    printk(KERN_ERR "[Linux]: dup_mmap: dropping inherited VM_NACC VMA [%lx, %lx) from child mm\n",
+                            mpnt->vm_start, mpnt->vm_end);
+            continue;
 		}
 		charge = 0;
 		/*
@@ -873,6 +889,17 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
                 parent_pgd_pa, child_pgd_pa,
                 nacc_fork_filter ? nacc_fork_filter->nr_ranges : 0,
                 filter_bytes);
+        if (nacc_fork_filter) {
+                unsigned int i;
+
+                for (i = 0; i < nacc_fork_filter->nr_ranges; i++) {
+                        struct nacc_fork_range *range = &nacc_fork_filter->ranges[i];
+
+                        printk(KERN_ERR "[Linux]: dup_mmap: fork_filter[%u] %s [%lx, %lx) type=%lx\n",
+                                i, nacc_fork_filter_type_name(range->type),
+                                range->start, range->end, range->type);
+                }
+        }
 		retval = nacc_fork(parent_pgd_pa, child_pgd_pa, nacc_fork_filter,
                            filter_bytes);
 	}
