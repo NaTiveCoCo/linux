@@ -328,7 +328,8 @@ void nacc_invoke_child(void)
 
 int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
               struct nacc_fork_filter *filter,
-              unsigned long filter_bytes)
+              unsigned long filter_bytes,
+              struct mm_struct *child_mm)
 {
     unsigned long ptp_list_bytes = PAGE_SIZE * NACC_FORK_PTP_LIST_PAGES;
     struct nacc_fork_ptp_list *ptp_list;
@@ -367,7 +368,7 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
         return -EIO;
     }
 
-    rc = nacc_register_fork_ptp_list(ptp_list, ptp_list_bytes);
+    rc = nacc_register_fork_ptp_list(child_mm, ptp_list, ptp_list_bytes);
     if (rc) {
         printk(KERN_ERR "[Linux]: nacc_fork ptp_list register failed: %d "
                "(nr=%u cap=%lu)\n",
@@ -378,6 +379,8 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
 
     printk(KERN_ERR "[Linux]: nacc_fork ptp_list entries=%u\n",
            ptp_list->nr_entries);
+    printk(KERN_ERR "[Linux]: nacc_fork child mm=%px pgtables_bytes=%lu after ptp_list registration\n",
+           child_mm, child_mm ? mm_pgtables_bytes(child_mm) : 0);
     kfree(ptp_list);
 
     printk(KERN_ERR "[Linux]: nacc_fork done.\n");

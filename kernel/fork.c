@@ -901,7 +901,7 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
                 }
         }
 		retval = nacc_fork(parent_pgd_pa, child_pgd_pa, nacc_fork_filter,
-                           filter_bytes);
+                           filter_bytes, mm);
 	}
 #endif
 

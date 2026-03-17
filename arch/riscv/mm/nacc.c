@@ -150,7 +150,8 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 }
 EXPORT_SYMBOL(nacc_reclaim_ptp_dtor);
 
-int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
+static int __page_nacc_register_ptp(struct mm_struct *mm,
+				    unsigned long pfn, unsigned int level)
 {
        unsigned long *slot;
        struct ptdesc *ptdesc;
@@ -193,14 +194,27 @@ int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
                return -EINVAL;
        }
 
+       if (mm) {
+	       if (level == 1)
+		       mm_inc_nr_pmds(mm);
+	       else
+		       mm_inc_nr_ptes(mm);
+       }
+
        *slot = pfn;
        nacc_dump_ptdesc_state("page_nacc_register_ptp: after ctor",
                               pfn, level, ptdesc);
        return 0;
 }
+
+int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
+{
+	return __page_nacc_register_ptp(NULL, pfn, level);
+}
 EXPORT_SYMBOL(page_nacc_register_ptp);
 
-int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
+int nacc_register_fork_ptp_list(struct mm_struct *mm,
+				struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes)
 {
 	unsigned long capacity;
@@ -232,7 +246,7 @@ int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
 		ptdesc = page_ptdesc(pfn_to_page(new_pfn));
         nacc_dump_ptdesc_state("nacc_register_fork_ptp_list: entry",
                                 new_pfn, level, ptdesc);
-        if (page_nacc_register_ptp(new_pfn, level)) {
+        if (__page_nacc_register_ptp(mm, new_pfn, level)) {
             printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: register failed for pfn=%lx level=%u packed=%lx\n",
                        new_pfn, level, packed);
             return -EINVAL;

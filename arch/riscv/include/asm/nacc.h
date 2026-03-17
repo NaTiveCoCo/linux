@@ -87,12 +87,14 @@ int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag);
 
-int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
+int nacc_register_fork_ptp_list(struct mm_struct *mm,
+				struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes);
 
 int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
               struct nacc_fork_filter *filter,
-              unsigned long filter_bytes);
+              unsigned long filter_bytes,
+              struct mm_struct *child_mm);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
