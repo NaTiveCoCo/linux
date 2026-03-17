@@ -1918,13 +1918,14 @@ EXPORT_SYMBOL(vm_brk_flags);
 /* Release all mmaps. */
 void exit_mmap(struct mm_struct *mm)
 {
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
+    if (nacc_mm_is_active(mm)) {
         pgtbl_debug(virt_to_phys(mm->pgd));
     }
 
-    if (unlikely(current->thread.nacc_flag)) {
-        printk(KERN_ERR "[Linux]: exit_mmap pid=%d nacc_flag=%lx mm=%px pgd=%px\n",
-               current->pid, current->thread.nacc_flag, mm, mm->pgd);
+    if (unlikely(current->thread.nacc_flag || nacc_mm_state(mm))) {
+        printk(KERN_ERR "[Linux]: exit_mmap pid=%d nacc_flag=%lx mm_state=%lx mm=%px pgd=%px\n",
+               current->pid, current->thread.nacc_flag,
+               nacc_mm_state(mm), mm, mm->pgd);
     }
 
 	struct mmu_gather tlb;
@@ -1953,7 +1954,7 @@ void exit_mmap(struct mm_struct *mm)
 	/* update_hiwater_rss(mm) here? but nobody should be looking */
 	/* Use ULONG_MAX here to ensure all VMAs in the mm are unmapped */
 	unmap_vmas(&tlb, &vmi.mas, vma, 0, ULONG_MAX, ULONG_MAX, false);
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
+    if (nacc_mm_is_active(mm)) {
         printk(KERN_ERR "[Linux] after unmap_vmas \n");
         pgtbl_debug(virt_to_phys(mm->pgd));
     }
@@ -1969,7 +1970,7 @@ void exit_mmap(struct mm_struct *mm)
 	vma_iter_set(&vmi, vma->vm_end);
 	free_pgtables(&tlb, &vmi.mas, vma, FIRST_USER_ADDRESS,
 		      USER_PGTABLES_CEILING, true);
-    if(current->thread.nacc_flag & NACC_RECLAIM) {
+    if (nacc_mm_is_active(mm)) {
         flush_reclaim_list();
         pgtbl_debug(virt_to_phys(mm->pgd));
     }

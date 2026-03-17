@@ -9,6 +9,7 @@
 
 #include <linux/mm.h>
 #include <asm/sbi.h>
+#include <asm/nacc.h>
 #include <asm/tlb.h>
 
 #ifdef CONFIG_MMU
@@ -176,15 +177,17 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 				  unsigned long addr)
 {
 	struct ptdesc *ptdesc;
-	if(current->thread.nacc_flag & NACC_RECLAIM){
+	if (nacc_mm_is_active(tlb->mm)) {
 		printk(KERN_ERR "[__pmd_free_tlb]: pmd_page_nacc will be called.\n");
 		ptdesc = virt_to_ptdesc_nacc(pmd);
-		pagetable_pmd_dtor(ptdesc);
 		/* If ptdesc PFN is in NACC range, it's a pure NACC page — don't buddy free */
 		if (page_to_pfn(ptdesc_page(ptdesc)) >= NACC_PTP_PFN_BASE
 		    && page_to_pfn(ptdesc_page(ptdesc)) < NACC_PTP_PFN_END) {
+			nacc_reclaim_ptp_dtor(ptdesc, page_to_pfn(ptdesc_page(ptdesc)),
+					      1, "__pmd_free_tlb");
 			return;
 		}
+		pagetable_pmd_dtor(ptdesc);
 		riscv_tlb_remove_ptdesc(tlb, ptdesc);
 	} else {
 		ptdesc = virt_to_ptdesc(pmd);

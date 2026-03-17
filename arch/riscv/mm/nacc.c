@@ -42,6 +42,33 @@ static unsigned long *nacc_mapping_slot(unsigned long pfn)
 
 DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
 
+unsigned long nacc_mm_state(struct mm_struct *mm)
+{
+	if (!mm)
+		return 0;
+
+	return READ_ONCE(mm->context.nacc_state);
+}
+EXPORT_SYMBOL(nacc_mm_state);
+
+void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask)
+{
+	unsigned long state;
+
+	if (!mm)
+		return;
+
+	state = READ_ONCE(mm->context.nacc_state);
+	WRITE_ONCE(mm->context.nacc_state, state | mask);
+}
+EXPORT_SYMBOL(nacc_mm_set_state);
+
+bool nacc_mm_is_active(struct mm_struct *mm)
+{
+	return !!(nacc_mm_state(mm) & NACC_MM_ACTIVE);
+}
+EXPORT_SYMBOL(nacc_mm_is_active);
+
 void add_to_reclaim_list(unsigned long pfn)
 {
     if (pfn < NACC_PTP_PFN_BASE || pfn >= NACC_PTP_PFN_END) {
@@ -101,6 +128,28 @@ unsigned long page_nacc_mappings(unsigned long pfn)
 
 EXPORT_SYMBOL(page_nacc_mappings);
 
+void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
+			   unsigned int level, const char *tag)
+{
+	unsigned long old_ptl = READ_ONCE(*(unsigned long *)&ptdesc->ptl);
+
+	if (level == 1)
+		pagetable_pmd_dtor(ptdesc);
+	else
+		pagetable_pte_dtor(ptdesc);
+
+	/*
+	 * Pure NACC pages skip buddy free, so they never get prep_new_page().
+	 * Reset the split-ptlock storage explicitly to make the next ctor
+	 * observe the same zero state that the allocator would have provided.
+	 */
+	WRITE_ONCE(*(unsigned long *)&ptdesc->ptl, 0);
+	printk(KERN_ERR "[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx\n",
+	       tag, pfn, level, old_ptl,
+	       READ_ONCE(*(unsigned long *)&ptdesc->ptl));
+}
+EXPORT_SYMBOL(nacc_reclaim_ptp_dtor);
+
 int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
 {
        unsigned long *slot;
@@ -122,7 +171,6 @@ int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
                return 0;
        }
 
-       *slot = pfn;
        ptdesc = page_ptdesc(pfn_to_page(pfn));
        nacc_dump_ptdesc_state("page_nacc_register_ptp: before ctor",
                               pfn, level, ptdesc);
@@ -145,6 +193,7 @@ int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
                return -EINVAL;
        }
 
+       *slot = pfn;
        nacc_dump_ptdesc_state("page_nacc_register_ptp: after ctor",
                               pfn, level, ptdesc);
        return 0;

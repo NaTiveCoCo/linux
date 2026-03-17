@@ -1096,12 +1096,6 @@ do_group_exit(int exit_code)
  */
 SYSCALL_DEFINE1(exit_group, int, error_code)
 {
-#ifdef CONFIG_RISCV
-#include <asm/nacc.h>
-    if (current->thread.nacc_flag & (NACC_INITED | NACC_FORKED))
-        current->thread.nacc_flag |= NACC_RECLAIM;
-#endif
-
 	do_group_exit((error_code & 0xff) << 8);
 	/* NOTREACHED */
 	return 0;

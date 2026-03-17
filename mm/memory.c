@@ -194,7 +194,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token;
-	if(current->thread.nacc_flag & NACC_RECLAIM){
+	if (nacc_mm_is_active(tlb->mm)) {
         // return the old pfn struct page.
 		token = pmd_pgtable_nacc(*pmd);
         // set the old pfn (pmd) entry to zero
@@ -205,7 +205,9 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 		if (page_to_pfn(token) >= NACC_PTP_PFN_BASE
 		    && page_to_pfn(token) < NACC_PTP_PFN_END) {
 			/* Pure NACC PTE page: only do dtor cleanup, skip buddy free */
-			pagetable_pte_dtor(page_ptdesc(token));
+			nacc_reclaim_ptp_dtor(page_ptdesc(token),
+					      page_to_pfn(token), 0,
+					      "free_pte_range");
 		} else {
 			/* Old buddy page: normal buddy free */
 			pte_free_tlb(tlb, token, addr);
@@ -1654,7 +1656,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 
 	tlb_change_page_size(tlb, PAGE_SIZE);
 	init_rss_vec(rss);
-	if(current->thread.nacc_flag & NACC_RECLAIM) {
+	if (nacc_mm_is_active(mm)) {
 		printk(KERN_ERR "zap_pte_range: start\n");
         printk(KERN_ERR "addr: %lx end: %lx\n", addr, end);
     }
@@ -1683,7 +1685,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		if (pte_present(ptent)) {
             max_nr = (end - addr) / PAGE_SIZE;
 			/* if the pte is new, then we can simply clear it, although it will trigger page fault, the monitor will handle it. */
-            if (current->thread.nacc_flag & NACC_RECLAIM) {
+            if (nacc_mm_is_active(mm)) {
                 /* if the pte is old, then we found the old PTE and clear it. */
                 if (pte_user(ptent)) {
                     if (!pte_new(ptent)) {
@@ -1781,7 +1783,7 @@ after_zap_present:
 	if (force_flush)
 		tlb_flush_mmu(tlb);
 
-	if (current->thread.nacc_flag & NACC_RECLAIM)
+	if (nacc_mm_is_active(mm))
 		printk(KERN_ERR "zap_pte_range: end\n");
 	return addr;
 }
@@ -1909,11 +1911,13 @@ void unmap_page_range(struct mmu_gather *tlb,
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
-	hit_nacc_reclaim = !!((current->thread.nacc_flag & NACC_RECLAIM) &&
+	hit_nacc_reclaim = !!(nacc_mm_is_active(vma->vm_mm) &&
 			       (vma->vm_flags & VM_NACC));
-	if (unlikely(current->thread.nacc_flag || (vma->vm_flags & VM_NACC))) {
-		printk(KERN_ERR "[Linux]: unmap_page_range pid=%d nacc_flag=%lx vma=[%lx,%lx) vm_flags=%lx addr=%lx end=%lx hit_nacc_reclaim=%d\n",
+	if (unlikely(current->thread.nacc_flag || nacc_mm_state(vma->vm_mm) ||
+		     (vma->vm_flags & VM_NACC))) {
+		printk(KERN_ERR "[Linux]: unmap_page_range pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx addr=%lx end=%lx hit_nacc_reclaim=%d\n",
 		       current->pid, current->thread.nacc_flag,
+		       nacc_mm_state(vma->vm_mm),
 		       vma->vm_start, vma->vm_end, vma->vm_flags,
 		       addr, end, hit_nacc_reclaim);
 	}
@@ -1953,9 +1957,11 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 	if (end <= vma->vm_start)
 		return;
 
-	if (unlikely(current->thread.nacc_flag || (vma->vm_flags & VM_NACC))) {
-		printk(KERN_ERR "[Linux]: unmap_single_vma pid=%d nacc_flag=%lx vma=[%lx,%lx) vm_flags=%lx start=%lx end=%lx vm_nacc=%d\n",
+	if (unlikely(current->thread.nacc_flag || nacc_mm_state(vma->vm_mm) ||
+		     (vma->vm_flags & VM_NACC))) {
+		printk(KERN_ERR "[Linux]: unmap_single_vma pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx start=%lx end=%lx vm_nacc=%d\n",
 		       current->pid, current->thread.nacc_flag,
+		       nacc_mm_state(vma->vm_mm),
 		       vma->vm_start, vma->vm_end, vma->vm_flags,
 		       start, end, !!(vma->vm_flags & VM_NACC));
 	}

@@ -326,7 +326,7 @@ asmlinkage __visible __trap_section  __no_stack_protector
 void do_trap_ecall_u(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
-        if (current->thread.nacc_flag & NACC_RECLAIM || current->thread.nacc_flag & NACC_INITED) {
+        if (current->thread.nacc_flag & NACC_INITED) {
             const char *name = "unknown";
             if (regs->a7 < ARRAY_SIZE(syscall_names))
                 name = syscall_names[regs->a7];
@@ -360,9 +360,8 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		choose_random_kstack_offset(get_random_u16());
 
 		syscall_exit_to_user_mode(regs);
-		if (current->thread.nacc_flag & NACC_RECLAIM) {
+		if (current->thread.nacc_flag & NACC_INITED)
             printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' syscall_exit_to_user_mode epc: %lx\n", regs->epc);
-        }
 	} else {
 		irqentry_state_t state = irqentry_nmi_enter(regs);
 

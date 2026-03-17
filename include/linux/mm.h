@@ -3132,7 +3132,8 @@ static inline void pmd_ptlock_free(struct ptdesc *ptdesc) {}
 static inline spinlock_t *pmd_lock(struct mm_struct *mm, pmd_t *pmd)
 {
     spinlock_t *ptl;
-    if (current->thread.nacc_flag & NACC_INITED) {
+    if ((current->thread.nacc_flag & NACC_INITED) ||
+        nacc_mm_is_active(mm)) {
         ptl = pmd_lockptr_nacc(mm, pmd);
     } else {
 	    ptl = pmd_lockptr(mm, pmd);

@@ -75,6 +75,7 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
     if (conflict) {
         if (conflict->vm_start == virt_agent && conflict->vm_end == virt_end &&
             (conflict->vm_flags & VM_NACC)) {
+            nacc_mm_set_state(mm, NACC_MM_ACTIVE);
             mmap_write_unlock(mm);
             return 0;
         }
@@ -114,6 +115,8 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
     }
 
     mmap_write_unlock(mm);
+
+    nacc_mm_set_state(mm, NACC_MM_ACTIVE);
 
     printk(KERN_ERR "[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx)\n",
            tag, virt_agent, virt_end, virt_agent, virt_agent + NACC_AGENT_MEM_SIZE);

@@ -6,6 +6,7 @@
 #define NACC_RECLAIM_LIST_SIZE 511
 
 struct mm_struct;
+struct ptdesc;
 
 struct nacc_reclaim_list {
 	unsigned long pfns[NACC_RECLAIM_LIST_SIZE];
@@ -15,7 +16,8 @@ struct nacc_reclaim_list {
 /* another macro for nacc_flag in nacc->thread field */
 #define NACC_PREPARE     0b001
 #define NACC_INITED      0b010
-#define NACC_RECLAIM     0b100
+
+#define NACC_MM_ACTIVE	0x1UL
 
 /* 
  * The agent has already been initialized, and the new child process is forked.
@@ -68,6 +70,10 @@ struct nacc_fork_filter {
 void add_to_reclaim_list(unsigned long pfn);
 void flush_reclaim_list(void);
 
+unsigned long nacc_mm_state(struct mm_struct *mm);
+void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask);
+bool nacc_mm_is_active(struct mm_struct *mm);
+
 void nacc_invoke(void);
 void nacc_reexec(void);
 void nacc_invoke_child(void);
@@ -78,6 +84,8 @@ void pgtbl_debug(unsigned long pgd);
 
 unsigned long page_nacc_mappings(unsigned long pfn);
 int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
+void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
+			   unsigned int level, const char *tag);
 
 int nacc_register_fork_ptp_list(struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes);
