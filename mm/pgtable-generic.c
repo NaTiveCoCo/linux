@@ -345,14 +345,13 @@ pte_t *pte_offset_map_nolock(struct mm_struct *mm, pmd_t *pmd,
 
 	pte = __pte_offset_map(pmd, addr, &pmdval);
 	if (likely(pte)) {
-        if ((current->thread.nacc_flag & NACC_INITED) ||
-            nacc_mm_is_active(mm)) {
-            *ptlp = pte_lockptr_nacc(mm, &pmdval);
-        } else {
-		    *ptlp = pte_lockptr(mm, &pmdval);
-        }
-    }
-    return pte;
+		if (nacc_use_secure_pt(mm)) {
+			*ptlp = pte_lockptr_nacc(mm, &pmdval);
+		} else {
+			*ptlp = pte_lockptr(mm, &pmdval);
+		}
+	}
+	return pte;
 }
 
 /*
@@ -407,21 +406,19 @@ pte_t *__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte;
 again:
 #ifdef CONFIG_RISCV
-    if (unlikely((current->thread.nacc_flag & NACC_INITED) ||
-		 nacc_mm_is_active(mm))) {
-        /* Normally go through the page table walk process. */
-        pte = __pte_offset_map(pmd, addr, &pmdval);
-        /* However, try to seize the old lock if it has. */
-        ptl = pte_lockptr_nacc(mm, &pmdval);
-        goto setlock;
-    }
-#endif	
+	if (unlikely(nacc_use_secure_pt(mm))) {
+		/* Keep walking the new secure PTP content, but borrow old metadata/PTL. */
+		pte = __pte_offset_map(pmd, addr, &pmdval);
+		ptl = pte_lockptr_nacc(mm, &pmdval);
+		goto setlock;
+	}
+#endif
 	pte = __pte_offset_map(pmd, addr, &pmdval);
 	if (unlikely(!pte))
 		return pte;
 	ptl = pte_lockptr(mm, &pmdval);
-setlock:	
-    spin_lock(ptl);
+setlock:
+	spin_lock(ptl);
 	if (likely(pmd_same(pmdval, pmdp_get_lockless(pmd)))) {
 		*ptlp = ptl;
 		return pte;

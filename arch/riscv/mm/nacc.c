@@ -155,6 +155,7 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
 {
        unsigned long *slot;
        struct ptdesc *ptdesc;
+       unsigned long pgtables_before = 0;
 
        slot = nacc_mapping_slot(pfn);
        if (!slot)
@@ -175,6 +176,8 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
        ptdesc = page_ptdesc(pfn_to_page(pfn));
        nacc_dump_ptdesc_state("page_nacc_register_ptp: before ctor",
                               pfn, level, ptdesc);
+       if (mm)
+	       pgtables_before = mm_pgtables_bytes(mm);
 
        if (level == 1) {
                if (!pagetable_pmd_ctor(ptdesc)) {
@@ -199,6 +202,8 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
 		       mm_inc_nr_pmds(mm);
 	       else
 		       mm_inc_nr_ptes(mm);
+	       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: mm=%px pfn=%lx level=%u pgtables_bytes %lu -> %lu\n",
+		      mm, pfn, level, pgtables_before, mm_pgtables_bytes(mm));
        }
 
        *slot = pfn;
@@ -230,6 +235,10 @@ int nacc_register_fork_ptp_list(struct mm_struct *mm,
 		return -EOVERFLOW;
 
 	nr_entries = ptp_list->nr_entries;
+	if (mm) {
+		printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: mm=%px nr_entries=%lu pgtables_bytes(before)=%lu\n",
+		       mm, nr_entries, mm_pgtables_bytes(mm));
+	}
 	for (i = 0; i < nr_entries; i++) {
 		unsigned long packed = ptp_list->entries[i];
 		unsigned long new_pfn = NACC_FORK_PTP_DECODE_PFN(packed);
@@ -246,11 +255,15 @@ int nacc_register_fork_ptp_list(struct mm_struct *mm,
 		ptdesc = page_ptdesc(pfn_to_page(new_pfn));
         nacc_dump_ptdesc_state("nacc_register_fork_ptp_list: entry",
                                 new_pfn, level, ptdesc);
-        if (__page_nacc_register_ptp(mm, new_pfn, level)) {
+	        if (__page_nacc_register_ptp(mm, new_pfn, level)) {
             printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: register failed for pfn=%lx level=%u packed=%lx\n",
                        new_pfn, level, packed);
             return -EINVAL;
 	    }
     }
+	if (mm) {
+		printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: mm=%px pgtables_bytes(after)=%lu\n",
+		       mm, mm_pgtables_bytes(mm));
+	}
 	return 0;
 }

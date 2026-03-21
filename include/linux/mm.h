@@ -2863,10 +2863,6 @@ static inline struct ptdesc *virt_to_ptdesc(const void *x)
 
 static inline struct ptdesc *virt_to_ptdesc_nacc(const void *x)
 {
-    unsigned long new_pfn = virt_to_pfn(x);
-    if(new_pfn >= NACC_PTP_PFN_BASE && new_pfn < NACC_PTP_PFN_END) {
-        add_to_reclaim_list(new_pfn);
-    }
 	return page_ptdesc(virt_to_page_nacc(x));
 }
 
@@ -3131,14 +3127,13 @@ static inline void pmd_ptlock_free(struct ptdesc *ptdesc) {}
 
 static inline spinlock_t *pmd_lock(struct mm_struct *mm, pmd_t *pmd)
 {
-    spinlock_t *ptl;
-    if ((current->thread.nacc_flag & NACC_INITED) ||
-        nacc_mm_is_active(mm)) {
-        ptl = pmd_lockptr_nacc(mm, pmd);
-    } else {
-	    ptl = pmd_lockptr(mm, pmd);
-    }
-    spin_lock(ptl);
+	spinlock_t *ptl;
+
+	if (nacc_use_secure_pt(mm))
+		ptl = pmd_lockptr_nacc(mm, pmd);
+	else
+		ptl = pmd_lockptr(mm, pmd);
+	spin_lock(ptl);
 	return ptl;
 }
 

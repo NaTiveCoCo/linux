@@ -194,6 +194,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token;
+	unsigned long pgtables_before = mm_pgtables_bytes(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
         // return the old pfn struct page.
 		token = pmd_pgtable_nacc(*pmd);
@@ -218,6 +219,11 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 		pte_free_tlb(tlb, token, addr);
 	}
 	mm_dec_nr_ptes(tlb->mm);
+	if (nacc_mm_is_active(tlb->mm)) {
+		printk(KERN_ERR "[Linux]: free_pte_range: mm=%px addr=%lx token_pfn=%lx pgtables_bytes %lu -> %lu\n",
+		       tlb->mm, addr, page_to_pfn(token),
+		       pgtables_before, mm_pgtables_bytes(tlb->mm));
+	}
 }
  
 static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
@@ -227,6 +233,7 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pmd_t *pmd;
 	unsigned long next;
 	unsigned long start;
+	unsigned long pgtables_before;
 
 	start = addr;
 	// change the pmd here, make sure we are leading to the old pfn?
@@ -256,8 +263,14 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
     // if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "[Linux]: after pud_clear\n");
 	// }
+	pgtables_before = mm_pgtables_bytes(tlb->mm);
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
+	if (nacc_mm_is_active(tlb->mm)) {
+		printk(KERN_ERR "[Linux]: free_pmd_range: mm=%px start=%lx pgtables_bytes %lu -> %lu\n",
+		       tlb->mm, start, pgtables_before,
+		       mm_pgtables_bytes(tlb->mm));
+	}
     // if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
 	// }
@@ -999,6 +1012,12 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 
 	/* If it's a COW mapping, write protect it both processes. */
 	if (is_cow_mapping(src_vma->vm_flags) && pte_write(pte)) {
+#ifdef CONFIG_RISCV
+		if (unlikely(nacc_use_secure_pt(src_mm))) {
+			printk_ratelimited("[Linux]: copy_present_ptes: NaCC wrprotect src_mm=%px addr=%lx nr=%d\n",
+					   src_mm, addr, nr);
+		}
+#endif
 		wrprotect_ptes(src_mm, addr, src_pte, nr);
 		pte = pte_wrprotect(pte);
 	}
@@ -1011,6 +1030,12 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_clear_uffd_wp(pte);
 
+#ifdef CONFIG_RISCV
+	if (unlikely(nacc_use_secure_pt(src_mm))) {
+		printk_ratelimited("[Linux]: copy_present_ptes: NaCC set child ptes dst_mm=%px addr=%lx nr=%d\n",
+				   dst_vma->vm_mm, addr, nr);
+	}
+#endif
 	set_ptes(dst_vma->vm_mm, addr, dst_pte, pte, nr);
 }
 
@@ -1409,6 +1434,13 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	struct mmu_notifier_range range;
 	bool is_cow;
 	int ret;
+
+#ifdef CONFIG_RISCV
+	if (unlikely(nacc_use_secure_pt(src_mm))) {
+		printk(KERN_ERR "[Linux]: copy_page_range: NaCC source mm=%px dst_mm=%px [%lx, %lx) flags=%lx\n",
+		       src_mm, dst_mm, addr, end, src_vma->vm_flags);
+	}
+#endif
 
 	if (!vma_needs_copy(dst_vma, src_vma))
 		return 0;

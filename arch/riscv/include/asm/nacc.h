@@ -3,6 +3,7 @@
 
 #ifndef __ASSEMBLY__
 #include <linux/types.h>
+#include <linux/sched.h>
 #define NACC_RECLAIM_LIST_SIZE 511
 
 struct mm_struct;
@@ -30,6 +31,9 @@ struct nacc_reclaim_list {
  * Use lightweight re-attach (no agent re-initialization jump).
  */
 #define NACC_REEXEC      0b10000
+
+#define NACC_PTP_PFN_BASE  0x1b0000
+#define NACC_PTP_PFN_END   0x1c0000
 
 #define NACC_FORK_PTP_LEVEL_MASK	0x3UL
 #define NACC_FORK_PTP_ENCODE(new_pfn, level) \
@@ -74,6 +78,33 @@ unsigned long nacc_mm_state(struct mm_struct *mm);
 void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask);
 bool nacc_mm_is_active(struct mm_struct *mm);
 
+static inline bool nacc_thread_is_inited(void)
+{
+	return !!(current->thread.nacc_flag & NACC_INITED);
+}
+
+static inline bool nacc_use_secure_pt(struct mm_struct *mm)
+{
+	/*
+	 * Two windows need secure page-table handling:
+	 * - fork/bootstrap construction while the current NaCC thread is
+	 *   still building a child/new mm
+	 * - steady-state or teardown of an mm that already owns secure PTPs
+	 */
+	return nacc_thread_is_inited() || nacc_mm_is_active(mm);
+}
+
+static inline bool nacc_pfn_is_secure_ptp(unsigned long pfn)
+{
+	return pfn >= NACC_PTP_PFN_BASE && pfn < NACC_PTP_PFN_END;
+}
+
+static inline void nacc_track_secure_ptp_pfn(unsigned long pfn)
+{
+	if (nacc_pfn_is_secure_ptp(pfn))
+		add_to_reclaim_list(pfn);
+}
+
 void nacc_invoke(void);
 void nacc_reexec(void);
 void nacc_invoke_child(void);
@@ -95,6 +126,10 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
               struct nacc_fork_filter *filter,
               unsigned long filter_bytes,
               struct mm_struct *child_mm);
+
+void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
+		       unsigned int nr);
+void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

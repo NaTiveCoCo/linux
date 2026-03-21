@@ -68,6 +68,8 @@ enum sbi_ext_nacc_fid {
     SBI_EXT_NACC_INVOKE_CHILD = 0x6,
     SBI_EXT_NACC_FORK = 0x7,
     SBI_EXT_NACC_REEXEC = 0x8,
+    SBI_EXT_NACC_SET_PTES = 0x9,
+    SBI_EXT_NACC_WRPROTECT_PTES = 0xa,
 
     SBI_EXT_LINUX_DEBUG = 0x999
 };

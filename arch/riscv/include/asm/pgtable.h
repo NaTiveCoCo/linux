@@ -254,13 +254,17 @@ static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 
 #define NACC_BASE_MAPPINGS 0x17ff00000
 #define NACC_MAPPINGS_SIZE 0x100000
-#define NACC_PTP_PFN_BASE  0x1b0000
-#define NACC_PTP_PFN_END   0x1c0000
-
 extern unsigned long nacc_mappings_virt;
 
 
 extern unsigned long page_nacc_mappings(unsigned long pfn);
+
+static inline bool nacc_is_secure_ptp_virt(const void *ptr)
+{
+	unsigned long pfn = virt_to_pfn(ptr);
+
+	return nacc_pfn_is_secure_ptp(pfn);
+}
 
 
 static inline void pmd_clear_nacc(pmd_t *pmdp)
@@ -635,6 +639,16 @@ static inline void __set_pte_at(struct mm_struct *mm, pte_t *ptep, pte_t pteval)
 	if (pte_present(pteval) && pte_exec(pteval))
 		flush_icache_pte(mm, pteval);
 
+#ifdef CONFIG_RISCV
+	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
+		/*
+		 * NaCC secure PTP pages are readable in S-mode but must be
+		 * written through M-mode.
+		 */
+		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), 1);
+		return;
+	}
+#endif
 	set_pte(ptep, pteval);
 }
 
@@ -645,6 +659,12 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 {
 	page_table_check_ptes_set(mm, ptep, pteval, nr);
 
+#ifdef CONFIG_RISCV
+	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
+		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), nr);
+		return;
+	}
+#endif
 	for (;;) {
 		__set_pte_at(mm, ptep, pteval);
 		if (--nr == 0)
@@ -685,6 +705,12 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long address, pte_t *ptep)
 {
+#ifdef CONFIG_RISCV
+	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
+		nacc_wrprotect_ptes_sbi(__pa(ptep), 1);
+		return;
+	}
+#endif
 	atomic_long_and(~(unsigned long)_PAGE_WRITE, (atomic_long_t *)ptep);
 }
 

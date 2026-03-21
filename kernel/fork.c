@@ -631,8 +631,8 @@ static void dup_mm_exe_file(struct mm_struct *mm, struct mm_struct *oldmm)
 
 #ifdef CONFIG_MMU
 #ifdef CONFIG_RISCV
-static bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
-                                        unsigned long *type)
+static __maybe_unused bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
+						      unsigned long *type)
 {
        unsigned long filter_type = 0;
 
@@ -650,7 +650,7 @@ static bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
        return true;
 }
 
-static struct nacc_fork_filter *nacc_fork_filter_alloc(unsigned int max_ranges)
+static __maybe_unused struct nacc_fork_filter *nacc_fork_filter_alloc(unsigned int max_ranges)
 {
        size_t bytes;
 
@@ -658,11 +658,11 @@ static struct nacc_fork_filter *nacc_fork_filter_alloc(unsigned int max_ranges)
        return kzalloc(bytes, GFP_KERNEL);
 }
 
-static int nacc_fork_filter_append(struct nacc_fork_filter *filter,
-                                      unsigned int max_ranges,
-                                      unsigned long start,
-                                      unsigned long end,
-                                      unsigned long type)
+static __maybe_unused int nacc_fork_filter_append(struct nacc_fork_filter *filter,
+						  unsigned int max_ranges,
+						  unsigned long start,
+						  unsigned long end,
+						  unsigned long type)
 {
        struct nacc_fork_range *range;
 
@@ -679,7 +679,7 @@ static int nacc_fork_filter_append(struct nacc_fork_filter *filter,
        return 0;
 }
 
-static const char *nacc_fork_filter_type_name(unsigned long type)
+static __maybe_unused const char *nacc_fork_filter_type_name(unsigned long type)
 {
        if (type & NACC_FORK_RANGE_VM_NACC)
                return "vm_nacc";
@@ -699,12 +699,6 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	unsigned long charge = 0;
 	LIST_HEAD(uf);
 	VMA_ITERATOR(vmi, mm, 0);
-#ifdef CONFIG_RISCV
-	int nacc_skip_copy_page_range = 0;
-    struct nacc_fork_filter *nacc_fork_filter = NULL;
-    unsigned int nacc_fork_filter_capacity = 0;
-#endif
-
 	uprobe_start_dup_mmap();
 	if (mmap_write_lock_killable(oldmm)) {
 		retval = -EINTR;
@@ -730,59 +724,22 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	if (unlikely(retval))
 		goto out;
 
-#ifdef CONFIG_RISCV
-	/*
-	 * NaCC fork bypass: If the parent is a NaCC-protected process,
-	 * its PTP pages are in secure memory and cannot be accessed from
-	 * S-Mode. We let the VMA/maple-tree metadata copy proceed normally
-	 * (it only touches mm/VMA structs, not page tables), but skip
-	 * copy_page_range() for each VMA. Instead, we delegate the entire
-	 * page table copy to OpenSBI via SBI ecall (M-Mode can access
-	 * secure memory).
-	 */
-	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: dup_mmap: NaCC parent (pid %d), "
-		       "will skip copy_page_range for child\n", current->pid);
-		nacc_skip_copy_page_range = 1;
-        nacc_fork_filter_capacity = oldmm->map_count ?: 1;
-        nacc_fork_filter = nacc_fork_filter_alloc(nacc_fork_filter_capacity);
-        if (!nacc_fork_filter) {
-                retval = -ENOMEM;
-                goto out;
-        }
-	}
-#endif
-
 	mt_clear_in_rcu(vmi.mas.tree);
 	for_each_vma(vmi, mpnt) {
 		struct file *file;
 
 		vma_start_write(mpnt);
-#ifdef CONFIG_RISCV
-        if (nacc_skip_copy_page_range) {
-            unsigned long filter_type;
-
-            if (nacc_fork_vma_needs_filter(mpnt, &filter_type)) {
-                retval = nacc_fork_filter_append(nacc_fork_filter,
-                                            nacc_fork_filter_capacity,
-                                            mpnt->vm_start, mpnt->vm_end,
-                                            filter_type);
-                if (retval)
-                    goto loop_out;
-            }
-        }
-#endif
-            if (mpnt->vm_flags & (VM_DONTCOPY | VM_NACC)) {
-                retval = vma_iter_clear_gfp(&vmi, mpnt->vm_start,
+		if (mpnt->vm_flags & (VM_DONTCOPY | VM_NACC)) {
+			retval = vma_iter_clear_gfp(&vmi, mpnt->vm_start,
 						    mpnt->vm_end, GFP_KERNEL);
 			if (retval)
 				goto loop_out;
 
 			vm_stat_account(mm, mpnt->vm_flags, -vma_pages(mpnt));
-            if (mpnt->vm_flags & VM_NACC)
-                    printk(KERN_ERR "[Linux]: dup_mmap: dropping inherited VM_NACC VMA [%lx, %lx) from child mm\n",
-                            mpnt->vm_start, mpnt->vm_end);
-            continue;
+			if (mpnt->vm_flags & VM_NACC)
+				printk(KERN_ERR "[Linux]: dup_mmap: dropping inherited VM_NACC VMA [%lx, %lx) from child mm\n",
+				       mpnt->vm_start, mpnt->vm_end);
+			continue;
 		}
 		charge = 0;
 		/*
@@ -853,12 +810,8 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 			i_mmap_unlock_write(mapping);
 		}
 
-		if (!(tmp->vm_flags & VM_WIPEONFORK)) {
-#ifdef CONFIG_RISCV
-			if (!nacc_skip_copy_page_range)
-#endif
-				retval = copy_page_range(tmp, mpnt);
-		}
+		if (!(tmp->vm_flags & VM_WIPEONFORK))
+			retval = copy_page_range(tmp, mpnt);
 
 		if (retval) {
 			mpnt = vma_next(&vmi);
@@ -867,43 +820,6 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	}
 	/* a new mm has just been created */
 	retval = arch_dup_mmap(oldmm, mm);
-
-#ifdef CONFIG_RISCV
-	/*
-	 * NaCC fork: After VMA metadata is fully copied, delegate the
-	 * page table tree copy to OpenSBI (M-Mode). Pass the physical
-	 * addresses of parent and child PGDs.
-	 */
-	if (nacc_skip_copy_page_range && !retval) {
-		unsigned long parent_pgd_pa = virt_to_phys(oldmm->pgd);
-		unsigned long child_pgd_pa = virt_to_phys(mm->pgd);
-        unsigned long filter_bytes = sizeof(*nacc_fork_filter);
-
-        if (nacc_fork_filter) {
-            filter_bytes = struct_size(nacc_fork_filter, ranges,
-                                         nacc_fork_filter->nr_ranges);
-        }
-     
-		printk(KERN_ERR "[Linux]: dup_mmap: calling nacc_fork "
-                "parent_pgd_pa=%lx child_pgd_pa=%lx filter_ranges=%u filter_bytes=%lu\n",
-                parent_pgd_pa, child_pgd_pa,
-                nacc_fork_filter ? nacc_fork_filter->nr_ranges : 0,
-                filter_bytes);
-        if (nacc_fork_filter) {
-                unsigned int i;
-
-                for (i = 0; i < nacc_fork_filter->nr_ranges; i++) {
-                        struct nacc_fork_range *range = &nacc_fork_filter->ranges[i];
-
-                        printk(KERN_ERR "[Linux]: dup_mmap: fork_filter[%u] %s [%lx, %lx) type=%lx\n",
-                                i, nacc_fork_filter_type_name(range->type),
-                                range->start, range->end, range->type);
-                }
-        }
-		retval = nacc_fork(parent_pgd_pa, child_pgd_pa, nacc_fork_filter,
-                           filter_bytes, mm);
-	}
-#endif
 
 loop_out:
 	vma_iter_free(&vmi);
@@ -926,9 +842,6 @@ out:
 	mmap_write_unlock(mm);
 	flush_tlb_mm(oldmm);
 	mmap_write_unlock(oldmm);
-#ifdef CONFIG_RISCV
-    kfree(nacc_fork_filter);
-#endif
 	if (!retval)
 		dup_userfaultfd_complete(&uf);
 	else

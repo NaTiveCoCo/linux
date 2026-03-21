@@ -387,6 +387,31 @@ int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
     return 0;
 }
 
+void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
+		       unsigned int nr)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_SET_PTES, ptep_pa,
+			pteval, nr, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_set_ptes_sbi failed: ptep_pa=%lx pteval=%lx nr=%u err=%ld val=%ld\n",
+		       ptep_pa, pteval, nr, ret.error, ret.value);
+	}
+}
+
+void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_WRPROTECT_PTES, ptep_pa,
+			nr, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_wrprotect_ptes_sbi failed: ptep_pa=%lx nr=%u err=%ld val=%ld\n",
+		       ptep_pa, nr, ret.error, ret.value);
+	}
+}
+
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;
