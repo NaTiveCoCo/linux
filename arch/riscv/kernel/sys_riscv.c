@@ -51,6 +51,18 @@ static unsigned long nacc_fixed_agent_base(void)
     return TASK_SIZE - NACC_AGENT_TOP_GAP - NACC_AGENT_SLOT_SIZE;
 }
 
+static void nacc_activate_current_mm(const char *tag)
+{
+    if (!current->mm)
+        return;
+
+    if (!nacc_mm_is_active(current->mm)) {
+        nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
+        printk(KERN_ERR "[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state=%lx\n",
+               tag, current->mm, nacc_mm_state(current->mm));
+    }
+}
+
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 {
     unsigned long virt_agent;
@@ -75,7 +87,6 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
     if (conflict) {
         if (conflict->vm_start == virt_agent && conflict->vm_end == virt_end &&
             (conflict->vm_flags & VM_NACC)) {
-            nacc_mm_set_state(mm, NACC_MM_ACTIVE);
             mmap_write_unlock(mm);
             return 0;
         }
@@ -116,10 +127,9 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 
     mmap_write_unlock(mm);
 
-    nacc_mm_set_state(mm, NACC_MM_ACTIVE);
-
-    printk(KERN_ERR "[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx)\n",
-           tag, virt_agent, virt_end, virt_agent, virt_agent + NACC_AGENT_MEM_SIZE);
+    printk(KERN_ERR "[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx), mm state unchanged=%lx\n",
+           tag, virt_agent, virt_end, virt_agent, virt_agent + NACC_AGENT_MEM_SIZE,
+           nacc_mm_state(mm));
 
     return 0;
 }
@@ -174,6 +184,8 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
         return;
 
     printk(KERN_ERR "[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
+
+    nacc_activate_current_mm(tag);
 
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
@@ -276,6 +288,7 @@ void nacc_reexec(void)
      * Set INITED before the SBI transition so later kernel entries don't keep
      * seeing the transient REEXEC flag forever.
      */
+    nacc_activate_current_mm("nacc_reexec");
     current->thread.nacc_flag = NACC_INITED;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REEXEC, virt_agent, pid,
@@ -314,6 +327,7 @@ void nacc_invoke_child(void)
     /* Call into OpenSBI to register child, transfer PTP, and map agent.
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
      * The remaining args are unused since we don't jump into agent. */
+    nacc_activate_current_mm("nacc_invoke_child");
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
               cid, 0, 0, 0);
 
