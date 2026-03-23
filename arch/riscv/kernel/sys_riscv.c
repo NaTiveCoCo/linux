@@ -340,6 +340,31 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
+void nacc_register_forked_child_pid(unsigned long child_pid)
+{
+    unsigned long cid = current->thread.nacc_cid;
+    struct sbiret ret;
+
+    if (!(current->thread.nacc_flag & NACC_INITED))
+        return;
+
+    if (!cid || !child_pid) {
+        printk(KERN_ERR "[Linux]: skip fork child pid registration: parent pid=%d child_pid=%lu cid=%lx flag=%lx\n",
+               current->pid, child_pid, cid, current->thread.nacc_flag);
+        return;
+    }
+
+    printk(KERN_ERR "[Linux]: register fork child pid early, parent pid=%d child_pid=%lu cid=%lx\n",
+           current->pid, child_pid, cid);
+
+    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, child_pid,
+                    0, 0, 0, 0);
+    if (ret.error) {
+        printk(KERN_ERR "[Linux]: early fork child pid registration failed: parent pid=%d child_pid=%lu cid=%lx err=%ld val=%ld\n",
+               current->pid, child_pid, cid, ret.error, ret.value);
+    }
+}
+
 int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
               struct nacc_fork_filter *filter,
               unsigned long filter_bytes,

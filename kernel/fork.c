@@ -2883,6 +2883,10 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 		task_unlock(p);
 	}
 
+#ifdef CONFIG_RISCV
+	nacc_register_forked_child_pid(nr);
+#endif
+
 	wake_up_new_task(p);
 
 	/* forking complete and child started to run, tell ptracer */

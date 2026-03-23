@@ -108,6 +108,7 @@ static inline void nacc_track_secure_ptp_pfn(unsigned long pfn)
 void nacc_invoke(void);
 void nacc_reexec(void);
 void nacc_invoke_child(void);
+void nacc_register_forked_child_pid(unsigned long child_pid);
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 
 void pgtbl_debug(unsigned long pgd);
