@@ -402,7 +402,7 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (current->thread.nacc_flag == NACC_PREPARE ||
 	    current->thread.nacc_flag == NACC_INITED ||
 	    current->thread.nacc_flag == NACC_FORKED ||
-	    current->thread.nacc_flag == NACC_REEXEC) {
+	    current->thread.nacc_flag == NACC_EXEC) {
 		err = nacc_reserve_agent_slot_mm(mm, "bprm_mm_init");
 		if (err)
 			goto err;
@@ -1297,18 +1297,18 @@ int begin_new_exec(struct linux_binprm * bprm)
 		goto out;
 
 #ifdef CONFIG_RISCV
-		/*
-		 * After exec_mmap, the old NaCC-protected mm has been freed and
-		 * we're on a fresh mm. Same-PID re-exec must be handled
-		 * separately from fork child re-attach because the new exec image
-		 * needs a refreshed agent/Linux trap context.
-		 */
-		if (me->thread.nacc_flag & NACC_INITED) {
-			printk(KERN_ERR "[Linux]: execve: switch nacc_flag to NACC_REEXEC after exec_mmap for pid %d\n",
-			       me->pid);
-			me->thread.nacc_flag = NACC_REEXEC;
-		}
-	#endif
+	/*
+	 * Normal NaCC exec paths switch to NACC_EXEC before bprm_mm_init() so
+	 * the fresh exec mm is built with ordinary Linux page-table
+	 * allocation. Keep this as a late fallback for any older path that
+	 * still reaches exec_mmap() while marked INITED.
+	 */
+	if (me->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: execve: late fallback switches nacc_flag to NACC_EXEC after exec_mmap for pid %d\n",
+		       me->pid);
+		me->thread.nacc_flag = NACC_EXEC;
+	}
+#endif
 
 	bprm->mm = NULL;
 
@@ -1508,8 +1508,35 @@ static void do_close_execat(struct file *file)
 		fput(file);
 }
 
+#ifdef CONFIG_RISCV
+static void nacc_prepare_exec_build_state(struct linux_binprm *bprm)
+{
+	if (current->thread.nacc_flag != NACC_INITED)
+		return;
+
+	current->thread.nacc_flag = NACC_EXEC;
+	printk(KERN_ERR "[Linux]: execve: switch nacc_flag to NACC_EXEC before bprm_mm_init for pid %d\n",
+	       current->pid);
+}
+
+static void nacc_restore_exec_build_state(struct linux_binprm *bprm)
+{
+	if (bprm->point_of_no_return)
+		return;
+
+	if (current->thread.nacc_flag == NACC_EXEC) {
+		current->thread.nacc_flag = NACC_INITED;
+		printk(KERN_ERR "[Linux]: execve: restore nacc_flag to NACC_INITED after pre-commit exec failure for pid %d\n",
+		       current->pid);
+	}
+}
+#endif
+
 static void free_bprm(struct linux_binprm *bprm)
 {
+#ifdef CONFIG_RISCV
+	nacc_restore_exec_build_state(bprm);
+#endif
 	if (bprm->mm) {
 		acct_arg_size(bprm, 0);
 		mmput(bprm->mm);
@@ -1573,6 +1600,10 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 		bprm->filename = bprm->fdpath;
 	}
 	bprm->interp = bprm->filename;
+
+#ifdef CONFIG_RISCV
+	nacc_prepare_exec_build_state(bprm);
+#endif
 
 	retval = bprm_mm_init(bprm);
 	if (!retval)
@@ -1891,8 +1922,13 @@ static int bprm_execve(struct linux_binprm *bprm)
 		nacc_invoke();
 	} else if (current->thread.nacc_flag == NACC_FORKED) {
 		nacc_invoke_child();
-	} else if (current->thread.nacc_flag == NACC_REEXEC) {
-		nacc_reexec();
+	} else if (current->thread.nacc_flag == NACC_EXEC) {
+		/*
+		 * Same-PID reexec and fork+exec converge here: Linux has
+		 * already built the fresh exec mm, and the NaCC exec attach
+		 * path now transfers that mm into secure ownership.
+		 */
+		nacc_exec();
 	}
 	#endif
     return retval;

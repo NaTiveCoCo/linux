@@ -261,7 +261,7 @@ void nacc_invoke(void)
     __nacc_invoke_full(SBI_EXT_NACC_INVOKE, "nacc_invoke");
 }
 
-void nacc_reexec(void)
+void nacc_exec(void)
 {
     unsigned long pid = current->pid;
     unsigned long virt_agent = 0;
@@ -269,18 +269,18 @@ void nacc_reexec(void)
     struct sbiret ret;
 
     /*
-     * Same-PID re-exec must not reuse fork-child re-attach semantics.
-     * Part 1 keeps the ABI minimal:
+     * Exec attach is shared by same-PID re-exec and fork+exec after the
+     * fresh exec mm has been built by Linux:
      * - install a fresh VM_NACC VMA for the new mm
      * - hand the new user pt_regs to OpenSBI
      * Trap-context refresh inside agent/OpenSBI is handled separately.
      */
-    printk(KERN_ERR "[Linux]: NACC_REEXEC preparing minimal reattach path.\n");
+    printk(KERN_ERR "[Linux]: NACC_EXEC preparing minimal reattach path.\n");
 
-    if (nacc_insert_agent_vma(&virt_agent, "nacc_reexec"))
+    if (nacc_insert_agent_vma(&virt_agent, "nacc_exec"))
         return;
 
-    printk(KERN_ERR "[Linux]: nacc_reexec using virt_agent %lx\n", virt_agent);
+    printk(KERN_ERR "[Linux]: nacc_exec using virt_agent %lx\n", virt_agent);
 
     /*
      * Re-exec now follows the same "non-returning" shape as nacc_invoke():
@@ -288,15 +288,15 @@ void nacc_reexec(void)
      * Set INITED before the SBI transition so later kernel entries don't keep
      * seeing the transient REEXEC flag forever.
      */
-    nacc_activate_current_mm("nacc_reexec");
+    nacc_activate_current_mm("nacc_exec");
     current->thread.nacc_flag = NACC_INITED;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REEXEC, virt_agent, pid,
                     (unsigned long) regs, 0, 0, 0);
 
     if (ret.error) {
-        current->thread.nacc_flag = NACC_REEXEC;
-        printk(KERN_ERR "[Linux]: nacc_reexec SBI returned unexpectedly with error %ld\n",
+        current->thread.nacc_flag = NACC_EXEC;
+        printk(KERN_ERR "[Linux]: nacc_exec SBI returned unexpectedly with error %ld\n",
                ret.error);
     }
 }
@@ -340,6 +340,50 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
+void nacc_attach_forked_child_if_needed(void)
+{
+    unsigned long pid;
+    unsigned long cid;
+    unsigned long virt_agent = 0;
+    struct sbiret ret;
+
+    if (current->thread.nacc_flag != NACC_FORKED)
+        return;
+
+    if (!current->mm) {
+        printk(KERN_ERR "[Linux]: skip fork child attach without mm, pid=%d flag=%lx\n",
+               current->pid, current->thread.nacc_flag);
+        return;
+    }
+
+    pid = current->pid;
+    cid = current->thread.nacc_cid;
+
+    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx mm=%px state=%lx\n",
+           pid, cid, current->mm, nacc_mm_state(current->mm));
+
+    if (nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child")) {
+        printk(KERN_ERR "[Linux]: failed to insert VM_NACC slot for fork child pid=%lu\n",
+               pid);
+        return;
+    }
+
+    nacc_activate_current_mm("nacc_attach_forked_child");
+
+    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_ATTACH_FORKED_CHILD,
+                    virt_agent, pid, cid, 0, 0, 0);
+    if (ret.error) {
+        printk(KERN_ERR "[Linux]: fork child attach SBI failed, pid=%lu cid=%lx err=%ld\n",
+               pid, cid, ret.error);
+        return;
+    }
+
+    current->thread.nacc_flag = NACC_INITED;
+
+    printk(KERN_ERR "[Linux]: fork child attach complete, pid=%lu cid=%lx virt_agent=%lx\n",
+           pid, cid, virt_agent);
+}
+
 void nacc_register_forked_child_pid(unsigned long child_pid)
 {
     unsigned long cid = current->thread.nacc_cid;
@@ -365,10 +409,16 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
     }
 }
 
-int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
-              struct nacc_fork_filter *filter,
-              unsigned long filter_bytes,
-              struct mm_struct *child_mm)
+/*
+ * Legacy fork-bypass path kept only to preserve the old Linux/OpenSBI ABI
+ * while the current fork mainline uses standard page-table allocation and PTE
+ * install hooks to build secure child page tables.
+ */
+int __maybe_unused nacc_fork(unsigned long parent_pgd_pa,
+			     unsigned long child_pgd_pa,
+			     struct nacc_fork_filter *filter,
+			     unsigned long filter_bytes,
+			     struct mm_struct *child_mm)
 {
     unsigned long ptp_list_bytes = PAGE_SIZE * NACC_FORK_PTP_LIST_PAGES;
     struct nacc_fork_ptp_list *ptp_list;

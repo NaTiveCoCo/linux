@@ -14,6 +14,7 @@
 #include <linux/sched/task_stack.h>
 #include <linux/tick.h>
 #include <linux/ptrace.h>
+#include <linux/resume_user_mode.h>
 #include <linux/uaccess.h>
 #include <linux/personality.h>
 
@@ -240,9 +241,10 @@ int copy_thread(struct task_struct *p, const struct kernel_clone_args *args)
 	 * First try fork + exec.
 	 * Only set NACC_FORKED when parent is a NaCC-inited process.
 	 */
-	if (current->thread.nacc_flag & NACC_INITED)
+	if (!args->fn && (current->thread.nacc_flag & NACC_INITED)) {
 		p->thread.nacc_flag = NACC_FORKED;
-	else
+		set_notify_resume(p);
+	} else
 		p->thread.nacc_flag = 0;
 
 	p->thread.riscv_v_flags = 0;

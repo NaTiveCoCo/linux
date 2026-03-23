@@ -630,67 +630,6 @@ static void dup_mm_exe_file(struct mm_struct *mm, struct mm_struct *oldmm)
 }
 
 #ifdef CONFIG_MMU
-#ifdef CONFIG_RISCV
-static __maybe_unused bool nacc_fork_vma_needs_filter(struct vm_area_struct *vma,
-						      unsigned long *type)
-{
-       unsigned long filter_type = 0;
-
-       if (vma->vm_flags & VM_DONTCOPY)
-               filter_type |= NACC_FORK_RANGE_DONTCOPY;
-       if (vma->vm_flags & VM_WIPEONFORK)
-               filter_type |= NACC_FORK_RANGE_WIPEONFORK;
-       if (vma->vm_flags & VM_NACC)
-               filter_type |= NACC_FORK_RANGE_VM_NACC;
-
-       if (!filter_type)
-               return false;
-
-       *type = filter_type;
-       return true;
-}
-
-static __maybe_unused struct nacc_fork_filter *nacc_fork_filter_alloc(unsigned int max_ranges)
-{
-       size_t bytes;
-
-       bytes = struct_size((struct nacc_fork_filter *)NULL, ranges, max_ranges);
-       return kzalloc(bytes, GFP_KERNEL);
-}
-
-static __maybe_unused int nacc_fork_filter_append(struct nacc_fork_filter *filter,
-						  unsigned int max_ranges,
-						  unsigned long start,
-						  unsigned long end,
-						  unsigned long type)
-{
-       struct nacc_fork_range *range;
-
-       if (!filter || !type || start >= end)
-               return -EINVAL;
-       if (filter->nr_ranges >= max_ranges)
-               return -EOVERFLOW;
-
-       range = &filter->ranges[filter->nr_ranges++];
-       range->start = start;
-       range->end = end;
-       range->type = type;
-
-       return 0;
-}
-
-static __maybe_unused const char *nacc_fork_filter_type_name(unsigned long type)
-{
-       if (type & NACC_FORK_RANGE_VM_NACC)
-               return "vm_nacc";
-       if (type & NACC_FORK_RANGE_DONTCOPY)
-               return "dontcopy";
-       if (type & NACC_FORK_RANGE_WIPEONFORK)
-               return "wipeonfork";
-       return "unknown";
-}
-#endif
-
 static __latent_entropy int dup_mmap(struct mm_struct *mm,
 					struct mm_struct *oldmm)
 {

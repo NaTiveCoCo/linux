@@ -27,10 +27,10 @@ struct nacc_reclaim_list {
 #define NACC_FORKED      0b1000
 
 /*
- * Re-exec path on the same PID for an already NaCC-protected task.
- * Use lightweight re-attach (no agent re-initialization jump).
+ * Exec rebuild state for an already NaCC-protected task.
+ * Covers both same-PID re-exec and fork+exec before final re-attach.
  */
-#define NACC_REEXEC      0b10000
+#define NACC_EXEC        0b10000
 
 #define NACC_PTP_PFN_BASE  0x1b0000
 #define NACC_PTP_PFN_END   0x1c0000
@@ -106,8 +106,9 @@ static inline void nacc_track_secure_ptp_pfn(unsigned long pfn)
 }
 
 void nacc_invoke(void);
-void nacc_reexec(void);
+void nacc_exec(void);
 void nacc_invoke_child(void);
+void nacc_attach_forked_child_if_needed(void);
 void nacc_register_forked_child_pid(unsigned long child_pid);
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 
@@ -123,10 +124,15 @@ int nacc_register_fork_ptp_list(struct mm_struct *mm,
 				struct nacc_fork_ptp_list *ptp_list,
 				unsigned long ptp_list_bytes);
 
-int nacc_fork(unsigned long parent_pgd_pa, unsigned long child_pgd_pa,
-              struct nacc_fork_filter *filter,
-              unsigned long filter_bytes,
-              struct mm_struct *child_mm);
+/*
+ * Legacy fork-bypass path. Current fork mainline relies on standard Linux
+ * dup_mmap/copy_page_range hooks instead of calling this helper directly.
+ */
+int __maybe_unused nacc_fork(unsigned long parent_pgd_pa,
+			     unsigned long child_pgd_pa,
+			     struct nacc_fork_filter *filter,
+			     unsigned long filter_bytes,
+			     struct mm_struct *child_mm);
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr);
