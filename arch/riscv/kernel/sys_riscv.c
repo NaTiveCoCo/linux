@@ -8,6 +8,7 @@
 #include <linux/syscalls.h>
 #include <linux/errno.h>
 #include <linux/mm.h>
+#include <linux/sched/signal.h>
 #include <asm/cacheflush.h>
 
 #include <asm/sbi.h>
@@ -59,8 +60,27 @@ static void nacc_activate_current_mm(const char *tag)
     if (!nacc_mm_is_active(current->mm)) {
         nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
         printk(KERN_ERR "[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state=%lx\n",
-               tag, current->mm, nacc_mm_state(current->mm));
+	               tag, current->mm, nacc_mm_state(current->mm));
     }
+}
+
+static void nacc_fail_fork_child_attach(const char *reason, long err,
+                                        unsigned long pid,
+                                        unsigned long cid)
+{
+    unsigned long mm_state = current->mm ? nacc_mm_state(current->mm) : 0;
+
+    printk(KERN_ERR "[Linux]: fatal fork child attach failure: reason=%s err=%ld"
+           " pid=%lu pid_vnr=%d tgid_vnr=%d cid=%lx mm=%px flag=%lx mm_state=%lx\n",
+           reason, err, pid, task_pid_vnr(current), task_tgid_vnr(current), cid,
+           current->mm, current->thread.nacc_flag, mm_state);
+
+    /*
+     * Do not leave the task in a half-attached NACC_FORKED state, otherwise
+     * later notify-resume hooks may retry attach and drift further.
+     */
+    current->thread.nacc_flag = 0;
+    force_exit_sig(SIGKILL);
 }
 
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
@@ -345,6 +365,7 @@ void nacc_attach_forked_child_if_needed(void)
     unsigned long pid;
     unsigned long cid;
     unsigned long virt_agent = 0;
+    int vma_ret;
     struct sbiret ret;
 
     if (current->thread.nacc_flag != NACC_FORKED)
@@ -353,6 +374,8 @@ void nacc_attach_forked_child_if_needed(void)
     if (!current->mm) {
         printk(KERN_ERR "[Linux]: skip fork child attach without mm, pid=%d flag=%lx\n",
                current->pid, current->thread.nacc_flag);
+        nacc_fail_fork_child_attach("missing-mm", -EINVAL, current->pid,
+                                    current->thread.nacc_cid);
         return;
     }
 
@@ -362,9 +385,11 @@ void nacc_attach_forked_child_if_needed(void)
     printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx mm=%px state=%lx\n",
            pid, cid, current->mm, nacc_mm_state(current->mm));
 
-    if (nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child")) {
+    vma_ret = nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child");
+    if (vma_ret) {
         printk(KERN_ERR "[Linux]: failed to insert VM_NACC slot for fork child pid=%lu\n",
                pid);
+        nacc_fail_fork_child_attach("insert-agent-vma", vma_ret, pid, cid);
         return;
     }
 
@@ -375,6 +400,7 @@ void nacc_attach_forked_child_if_needed(void)
     if (ret.error) {
         printk(KERN_ERR "[Linux]: fork child attach SBI failed, pid=%lu cid=%lx err=%ld\n",
                pid, cid, ret.error);
+        nacc_fail_fork_child_attach("sbi-attach", ret.error, pid, cid);
         return;
     }
 
