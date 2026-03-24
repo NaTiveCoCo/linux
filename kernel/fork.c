@@ -2758,6 +2758,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	struct task_struct *p;
 	int trace = 0;
 	pid_t nr;
+	pid_t nacc_nr;
 
 	/*
 	 * For legacy clone() calls, CLONE_PIDFD uses the parent_tid argument
@@ -2805,6 +2806,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
+	nacc_nr = pid_nr(pid);
 
 	if (clone_flags & CLONE_PARENT_SETTID)
 		put_user(nr, args->parent_tid);
@@ -2823,7 +2825,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	}
 
 #ifdef CONFIG_RISCV
-	nacc_register_forked_child_pid(nr);
+	nacc_register_forked_child_pid(nacc_nr);
 #endif
 
 	wake_up_new_task(p);
