@@ -365,6 +365,7 @@ void nacc_attach_forked_child_if_needed(void)
     unsigned long pid;
     unsigned long cid;
     unsigned long virt_agent = 0;
+    unsigned long user_pt_regs = 0;
     int vma_ret;
     struct sbiret ret;
 
@@ -381,9 +382,11 @@ void nacc_attach_forked_child_if_needed(void)
 
     pid = current->pid;
     cid = current->thread.nacc_cid;
+    user_pt_regs = (unsigned long)task_pt_regs(current);
 
-    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx mm=%px state=%lx\n",
-           pid, cid, current->mm, nacc_mm_state(current->mm));
+    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx mm=%px regs=%px state=%lx\n",
+           pid, cid, current->mm, (void *)user_pt_regs,
+           nacc_mm_state(current->mm));
 
     vma_ret = nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child");
     if (vma_ret) {
@@ -394,20 +397,27 @@ void nacc_attach_forked_child_if_needed(void)
     }
 
     nacc_activate_current_mm("nacc_attach_forked_child");
+    /*
+     * Child attach now follows the same non-returning lightweight agent shape
+     * as exec attach: OpenSBI enters the agent and the agent returns directly
+     * to userspace after refreshing the trap contract for this child.
+     */
+    current->thread.nacc_flag = NACC_INITED;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_ATTACH_FORKED_CHILD,
-                    virt_agent, pid, cid, 0, 0, 0);
+                    virt_agent, pid, cid, user_pt_regs, 0, 0);
     if (ret.error) {
+        current->thread.nacc_flag = NACC_FORKED;
         printk(KERN_ERR "[Linux]: fork child attach SBI failed, pid=%lu cid=%lx err=%ld\n",
                pid, cid, ret.error);
         nacc_fail_fork_child_attach("sbi-attach", ret.error, pid, cid);
         return;
     }
 
-    current->thread.nacc_flag = NACC_INITED;
-
-    printk(KERN_ERR "[Linux]: fork child attach complete, pid=%lu cid=%lx virt_agent=%lx\n",
+    current->thread.nacc_flag = NACC_FORKED;
+    printk(KERN_ERR "[Linux]: fork child attach unexpectedly returned, pid=%lu cid=%lx virt_agent=%lx\n",
            pid, cid, virt_agent);
+    nacc_fail_fork_child_attach("sbi-attach-return", -EIO, pid, cid);
 }
 
 void nacc_register_forked_child_pid(unsigned long child_pid)
