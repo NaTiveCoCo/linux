@@ -2950,13 +2950,9 @@ static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 
 static inline spinlock_t *pte_lockptr_nacc(struct mm_struct *mm, pmd_t *pmd)
 {
-    struct ptdesc* desc = page_ptdesc(pmd_page_nacc(*pmd));
-    printk(KERN_ERR "desc: %lx pmd: %lx *pmd pfn: %lx *pmd: %lx lock: %lx\n", (unsigned long)desc, (unsigned long)pmd, __page_val_to_pfn(pmd_val(*pmd)), (unsigned long)(pmd_val(*pmd)), (unsigned long) ptlock_ptr(desc));
-    printk(KERN_ERR "desc details: flags: %lx pad1: %lx mapping: %lx index: %lx pad2: %lx type: %x ref: %d\n",
-        desc->__page_flags, desc->_pt_pad_1, desc->__page_mapping, desc->pt_index,
-        desc->_pt_pad_2, desc->__page_type, atomic_read(&desc->__page_refcount));
-    
-    return ptlock_ptr(desc);
+	struct ptdesc *desc = page_ptdesc(pmd_page_nacc(*pmd));
+
+	return ptlock_ptr(desc);
 }
 
 static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)

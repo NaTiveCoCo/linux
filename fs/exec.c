@@ -1983,6 +1983,14 @@ static int do_execveat_common(int fd, struct filename *filename,
 		goto out_ret;
 	}
 
+#ifdef CONFIG_RISCV
+	if (current->thread.nacc_flag) {
+		printk(KERN_ERR "[Linux]: do_execveat_common pid=%d comm=%s nacc_flag=%lx filename=%s\n",
+		       current->pid, current->comm, current->thread.nacc_flag,
+		       bprm->filename);
+	}
+#endif
+
 	retval = count(argv, MAX_ARG_STRINGS);
 	if (retval == 0)
 		pr_warn_once("process '%s' launched '%s' with NULL argv: empty string added\n",

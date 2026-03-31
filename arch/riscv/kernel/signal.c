@@ -241,21 +241,50 @@ SYSCALL_DEFINE0(rt_sigreturn)
 
 	frame = (struct rt_sigframe __user *)regs->sp;
 
-	if (!access_ok(frame, frame_size))
-		goto badframe;
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: rt_sigreturn entry pid=%d comm=%s cid=%lx frame=%px frame_size=%zu epc=%lx sp=%lx ra=%lx a0=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       frame, frame_size, regs->epc, regs->sp, regs->ra,
+		       regs->a0);
+	}
 
-	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set)))
+	if (!access_ok(frame, frame_size)) {
+		if (current->thread.nacc_flag & NACC_INITED)
+			printk(KERN_ERR "[Linux]: rt_sigreturn access_ok failed pid=%d frame=%px frame_size=%zu\n",
+			       current->pid, frame, frame_size);
 		goto badframe;
+	}
+
+	if (__copy_from_user(&set, &frame->uc.uc_sigmask, sizeof(set))) {
+		if (current->thread.nacc_flag & NACC_INITED)
+			printk(KERN_ERR "[Linux]: rt_sigreturn copy_sigmask failed pid=%d frame=%px\n",
+			       current->pid, frame);
+		goto badframe;
+	}
 
 	set_current_blocked(&set);
 
-	if (restore_sigcontext(regs, &frame->uc.uc_mcontext))
+	if (restore_sigcontext(regs, &frame->uc.uc_mcontext)) {
+		if (current->thread.nacc_flag & NACC_INITED)
+			printk(KERN_ERR "[Linux]: rt_sigreturn restore_sigcontext failed pid=%d frame=%px\n",
+			       current->pid, frame);
 		goto badframe;
+	}
 
-	if (restore_altstack(&frame->uc.uc_stack))
+	if (restore_altstack(&frame->uc.uc_stack)) {
+		if (current->thread.nacc_flag & NACC_INITED)
+			printk(KERN_ERR "[Linux]: rt_sigreturn restore_altstack failed pid=%d frame=%px\n",
+			       current->pid, frame);
 		goto badframe;
+	}
 
 	regs->cause = -1UL;
+
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: rt_sigreturn restore done pid=%d comm=%s cid=%lx epc=%lx sp=%lx ra=%lx a0=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       regs->epc, regs->sp, regs->ra, regs->a0);
+	}
 
 	return regs->a0;
 
@@ -327,6 +356,12 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	size_t frame_size = get_rt_frame_size(false);
 
 	frame = get_sigframe(ksig, regs, frame_size);
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: setup_rt_frame pid=%d comm=%s cid=%lx sig=%d handler=%px old_epc=%lx old_ra=%lx old_sp=%lx frame=%px frame_size=%zu\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
+		       regs->sp, frame, frame_size);
+	}
 	if (!access_ok(frame, frame_size))
 		return -EFAULT;
 
@@ -374,6 +409,13 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->a1 = (unsigned long)(&frame->info); /* a1: siginfo pointer */
 	regs->a2 = (unsigned long)(&frame->uc);   /* a2: ucontext pointer */
 
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: setup_rt_frame prepared pid=%d comm=%s cid=%lx sig=%d new_epc=%lx new_ra=%lx new_sp=%lx a0=%lx a1=%lx a2=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       ksig->sig, regs->epc, regs->ra, regs->sp,
+		       regs->a0, regs->a1, regs->a2);
+	}
+
 #if DEBUG_SIG
 	pr_info("SIG deliver (%s:%d): sig=%d pc=%p ra=%p sp=%p\n",
 		current->comm, task_pid_nr(current), ksig->sig,
@@ -388,6 +430,13 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	sigset_t *oldset = sigmask_to_save();
 	int ret;
 
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: handle_signal pid=%d comm=%s cid=%lx sig=%d handler=%px epc=%lx ra=%lx sp=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
+		       regs->sp);
+	}
+
 	rseq_signal_deliver(ksig, regs);
 
 	/* Set up the stack frame */
@@ -395,6 +444,12 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 		ret = compat_setup_rt_frame(ksig, oldset, regs);
 	else
 		ret = setup_rt_frame(ksig, oldset, regs);
+
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: handle_signal setup_done pid=%d comm=%s cid=%lx sig=%d ret=%d epc=%lx ra=%lx sp=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       ksig->sig, ret, regs->epc, regs->ra, regs->sp);
+	}
 
 	signal_setup_done(ret, ksig, 0);
 }

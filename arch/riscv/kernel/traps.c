@@ -326,12 +326,15 @@ asmlinkage __visible __trap_section  __no_stack_protector
 void do_trap_ecall_u(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
-        if (current->thread.nacc_flag & NACC_INITED) {
-            const char *name = "unknown";
-            if (regs->a7 < ARRAY_SIZE(syscall_names))
-                name = syscall_names[regs->a7];
-            printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' syscall: %lx (%s)\n", regs->a7, name);
-        }
+		if (current->thread.nacc_flag & NACC_INITED) {
+			const char *name = "unknown";
+			if (regs->a7 < ARRAY_SIZE(syscall_names))
+				name = syscall_names[regs->a7];
+			printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' pid=%d comm=%s cid=%lx nacc_flag=%lx epc=%lx sp=%lx a0=%lx a1=%lx a2=%lx syscall: %lx (%s)\n",
+			       current->pid, current->comm, current->thread.nacc_cid,
+			       current->thread.nacc_flag, regs->epc, regs->sp,
+			       regs->a0, regs->a1, regs->a2, regs->a7, name);
+		}
 		long syscall = regs->a7;
 
 		regs->epc += 4;
@@ -361,7 +364,9 @@ void do_trap_ecall_u(struct pt_regs *regs)
 
 		syscall_exit_to_user_mode(regs);
 		if (current->thread.nacc_flag & NACC_INITED)
-            printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' syscall_exit_to_user_mode epc: %lx\n", regs->epc);
+			printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' pid=%d comm=%s cid=%lx syscall_exit_to_user_mode epc: %lx\n",
+			       current->pid, current->comm, current->thread.nacc_cid,
+			       regs->epc);
 	} else {
 		irqentry_state_t state = irqentry_nmi_enter(regs);
 
@@ -371,15 +376,17 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		irqentry_nmi_exit(regs, state);
 	}
 
-    if (current->thread.nacc_flag & NACC_INITED) {
-        printk(KERN_ERR "[Linux]: Back to 'do_trap_ecall_u' in kernel. With regs: %lx\n", (unsigned long)regs);
-        printk(KERN_ERR "[Linux]: regs->sstatus: %lx\n", regs->status);
-		printk(KERN_ERR "[Linux]: regs->epc: %lx\n", regs->epc);        
-        // 0001000    00010 00000 000 00000 0001011
-        csr_write(CSR_NACC_SSTATUS, regs->status);
-        // acall logic should be modified.
-        __asm__ volatile (".word 0x1020000b" ::: "memory");
-    }
+	if (current->thread.nacc_flag & NACC_INITED) {
+		printk(KERN_ERR "[Linux]: Back to 'do_trap_ecall_u' pid=%d comm=%s cid=%lx regs=%lx\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       (unsigned long)regs);
+		printk(KERN_ERR "[Linux]: regs->sstatus: %lx\n", regs->status);
+		printk(KERN_ERR "[Linux]: regs->epc: %lx\n", regs->epc);
+		// 0001000    00010 00000 000 00000 0001011
+		csr_write(CSR_NACC_SSTATUS, regs->status);
+		// acall logic should be modified.
+		__asm__ volatile (".word 0x1020000b" ::: "memory");
+	}
 }
 
 #ifdef CONFIG_MMU
@@ -468,12 +475,11 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 
 	irqentry_exit(regs, state);
 
-    if (current->thread.nacc_flag & NACC_INITED) {
-        // 0001000    00010 00000 000 00000 0001011
+	if (current->thread.nacc_flag & NACC_INITED) {
+		// 0001000    00010 00000 000 00000 0001011
 		csr_write(CSR_NACC_SSTATUS, regs->status);
-        printk(KERN_ERR "[Linux]: Back to 'do_irq' in kernel. With regs->status: %lx\n", regs->status);
-        __asm__ volatile (".word 0x1020000b" ::: "memory");
-    }
+		__asm__ volatile (".word 0x1020000b" ::: "memory");
+	}
 }
 
 #ifdef CONFIG_GENERIC_BUG

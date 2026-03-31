@@ -384,9 +384,14 @@ void nacc_attach_forked_child_if_needed(void)
     cid = current->thread.nacc_cid;
     user_pt_regs = (unsigned long)task_pt_regs(current);
 
-    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx mm=%px regs=%px state=%lx\n",
-           pid, cid, current->mm, (void *)user_pt_regs,
-           nacc_mm_state(current->mm));
+    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx nacc_flag=%lx mm=%px regs=%px state=%lx epc=%lx sp=%lx ra=%lx tp=%lx a0=%lx a1=%lx a2=%lx a3=%lx a0_is_zero=%s\n",
+           pid, cid, current->thread.nacc_flag, current->mm,
+           (void *)user_pt_regs, nacc_mm_state(current->mm),
+           task_pt_regs(current)->epc, task_pt_regs(current)->sp,
+           task_pt_regs(current)->ra, task_pt_regs(current)->tp,
+           task_pt_regs(current)->a0, task_pt_regs(current)->a1,
+           task_pt_regs(current)->a2, task_pt_regs(current)->a3,
+           task_pt_regs(current)->a0 == 0 ? "yes" : "no");
 
     vma_ret = nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child");
     if (vma_ret) {

@@ -854,10 +854,6 @@ static struct page *follow_page_pte(struct vm_area_struct *vma,
 
 	page = vm_normal_page(vma, address, pte);
 
-    if (current->thread.nacc_flag & NACC_INITED) {
-        printk(KERN_ERR "[follow_page_pte]: page: %p, address: %lx, vpn[2]: %ld vpn[1]: %ld vpn[0]: %ld pte: %lx, vma: %p, pmd: %p\n",
-               page, address, (address >> 30) & 0x1ff, (address >> 21) & 0x1ff, (address >> 12) & 0x1ff, pte_val(pte), vma, pmd);   
-    }
 	/*
 	 * We only care about anon pages in can_follow_write_pte() and don't
 	 * have to worry about pte_devmap() because they are never anon.
