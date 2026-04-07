@@ -54,13 +54,17 @@ static unsigned long nacc_fixed_agent_base(void)
 
 static void nacc_activate_current_mm(const char *tag)
 {
+    unsigned long old_state;
+
     if (!current->mm)
         return;
 
-    if (!nacc_mm_is_active(current->mm)) {
+    old_state = nacc_mm_state(current->mm);
+
+    if (!(old_state & NACC_MM_ACTIVE)) {
         nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
-        printk(KERN_ERR "[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state=%lx\n",
-	               tag, current->mm, nacc_mm_state(current->mm));
+        printk(KERN_ERR "[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
+	       tag, current->mm, old_state, nacc_mm_state(current->mm));
     }
 }
 
@@ -325,10 +329,10 @@ void nacc_invoke_child(void)
 {
     /*
      * For fork + exec cases only.
-     * The agent region (VM_NACC) is already initialized by the parent.
+     * Linux already built the fresh child exec mm using secure non-leaf PTPs.
      * We only need to:
      * 1. Register child PID with parent's CID (done in OpenSBI)
-     * 2. Transfer PTP for the child's new page table (done in OpenSBI)
+     * 2. Let OpenSBI validate that secure user PTP build and refresh metadata
      * 3. Map agent region into child's address space (done in OpenSBI)
      * No agent jump needed — child stays in Linux.
      */
@@ -344,7 +348,7 @@ void nacc_invoke_child(void)
     printk(KERN_ERR "[Linux]: Child re-attach uses fixed virt_agent %lx\n",
            virt_agent);
 
-    /* Call into OpenSBI to register child, transfer PTP, and map agent.
+    /* Call into OpenSBI to register child, validate secure user PTPs, and map agent.
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
      * The remaining args are unused since we don't jump into agent. */
     nacc_activate_current_mm("nacc_invoke_child");

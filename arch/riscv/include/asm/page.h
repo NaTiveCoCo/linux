@@ -192,9 +192,6 @@ extern phys_addr_t __phys_addr_symbol(unsigned long x);
 #define pfn_to_virt(pfn)	(__va(pfn_to_phys(pfn)))
 
 #define virt_to_page(vaddr)	(pfn_to_page(virt_to_pfn(vaddr)))
-#ifdef CONFIG_RISCV
-#define virt_to_page_nacc(vaddr) (pfn_to_page(page_nacc_mappings(virt_to_pfn(vaddr))))
-#endif
 #define page_to_virt(page)	(pfn_to_virt(page_to_pfn(page)))
 
 #define page_to_phys(page)	(pfn_to_phys(page_to_pfn(page)))

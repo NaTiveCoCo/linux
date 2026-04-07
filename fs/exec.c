@@ -389,6 +389,17 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (!mm)
 		goto err;
 
+#ifdef CONFIG_RISCV
+	if (current->thread.nacc_flag == NACC_PREPARE ||
+	    current->thread.nacc_flag == NACC_INITED ||
+	    current->thread.nacc_flag == NACC_FORKED ||
+	    current->thread.nacc_flag == NACC_EXEC) {
+		nacc_mm_set_state(mm, NACC_MM_ACTIVE);
+		printk(KERN_ERR "[Linux]: bprm_mm_init: mark new mm=%px as NACC_MM_ACTIVE for pid %d flag=%lx\n",
+		       mm, current->pid, current->thread.nacc_flag);
+	}
+#endif
+
 	/* Save current stack limit for all calculations made during exec. */
 	task_lock(current->group_leader);
 	bprm->rlim_stack = current->signal->rlim[RLIMIT_STACK];
@@ -1298,13 +1309,13 @@ int begin_new_exec(struct linux_binprm * bprm)
 
 #ifdef CONFIG_RISCV
 	/*
-	 * Normal NaCC exec paths switch to NACC_EXEC before bprm_mm_init() so
-	 * the fresh exec mm is built with ordinary Linux page-table
-	 * allocation. Keep this as a late fallback for any older path that
-	 * still reaches exec_mmap() while marked INITED.
+	 * Exec-build security is now keyed off the new bprm->mm state that was
+	 * set in bprm_mm_init(). Keep this late flag switch only as a dispatch
+	 * fallback so the post-exec NaCC reattach path still runs if an older
+	 * caller somehow skipped nacc_prepare_exec_build_state().
 	 */
 	if (me->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: execve: late fallback switches nacc_flag to NACC_EXEC after exec_mmap for pid %d\n",
+		printk(KERN_ERR "[Linux]: execve: late dispatch fallback switches nacc_flag to NACC_EXEC after exec_mmap for pid %d\n",
 		       me->pid);
 		me->thread.nacc_flag = NACC_EXEC;
 	}
@@ -1926,7 +1937,8 @@ static int bprm_execve(struct linux_binprm *bprm)
 		/*
 		 * Same-PID reexec and fork+exec converge here: Linux has
 		 * already built the fresh exec mm, and the NaCC exec attach
-		 * path now transfers that mm into secure ownership.
+		 * path now prepares that mm for secure ownership without
+		 * requiring unconditional bulk PTP transfer.
 		 */
 		nacc_exec();
 	}

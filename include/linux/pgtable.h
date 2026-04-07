@@ -50,10 +50,6 @@
 #define pmd_pgtable(pmd) pmd_page(pmd)
 #endif
 
-#ifdef CONFIG_RISCV
-#define pmd_pgtable_nacc(pmd) pmd_page_nacc(pmd);
-#endif
-
 #define pmd_folio(pmd) page_folio(pmd_page(pmd))
 
 /*
@@ -110,13 +106,6 @@ static inline pte_t *pte_offset_kernel(pmd_t *pmd, unsigned long address)
 	rcu_read_unlock();	\
 } while (0)
 #else
-
-#ifdef CONFIG_RISCV
-static inline pte_t* __pte_map_nacc(pmd_t *pmd, unsigned long address)
-{
-	return (pte_t *) ((unsigned long) pfn_to_virt(pmd_page_nacc_mappings(*pmd))) + pte_index(address);
-}
-#endif
 
 static inline pte_t *__pte_map(pmd_t *pmd, unsigned long address)
 {

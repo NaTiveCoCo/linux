@@ -8,6 +8,8 @@
 #include <asm/page.h>
 #include <asm/pgtable.h>
 
+extern unsigned long nacc_mappings_virt;
+
 static const char *nacc_fork_ptp_level_name(unsigned int level)
 {
        if (level == 1)
@@ -38,6 +40,11 @@ static unsigned long *nacc_mapping_slot(unsigned long pfn)
 
        return (unsigned long *)(nacc_mappings_virt +
                                 ((pfn - NACC_PTP_PFN_BASE) << 4));
+}
+
+static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
+{
+       return READ_ONCE(*(unsigned long *)&ptdesc->ptl);
 }
 
 DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
@@ -108,30 +115,12 @@ void pgtbl_debug(unsigned long pgd)
               0, 0, 0, 0);
 }
 
-unsigned long page_nacc_mappings(unsigned long pfn)
-{
-	unsigned long *slot = nacc_mapping_slot(pfn);
-    unsigned long actual_pfn;
-
-    if (!slot)
-            return pfn;
-
-    actual_pfn = *slot;
-    if (!actual_pfn) {
-            printk(KERN_ERR "[page_nacc_mappings]: missing mapping for pfn=%lx, fallback to self\n",
-                   pfn);
-            return pfn;
-    }
-
-    return actual_pfn;
-}
-
-EXPORT_SYMBOL(page_nacc_mappings);
-
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag)
 {
-	unsigned long old_ptl = READ_ONCE(*(unsigned long *)&ptdesc->ptl);
+	unsigned long *slot = nacc_mapping_slot(pfn);
+	unsigned long old_ptl = nacc_ptdesc_raw_ptl(ptdesc);
+	unsigned long old_slot = slot ? READ_ONCE(*slot) : 0;
 
 	if (level == 1)
 		pagetable_pmd_dtor(ptdesc);
@@ -144,9 +133,12 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 	 * observe the same zero state that the allocator would have provided.
 	 */
 	WRITE_ONCE(*(unsigned long *)&ptdesc->ptl, 0);
-	printk(KERN_ERR "[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx\n",
+	if (slot && old_slot == pfn)
+		WRITE_ONCE(*slot, 0);
+	printk(KERN_ERR "[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx old_slot=%lx new_slot=%lx\n",
 	       tag, pfn, level, old_ptl,
-	       READ_ONCE(*(unsigned long *)&ptdesc->ptl));
+	       nacc_ptdesc_raw_ptl(ptdesc), old_slot,
+	       slot ? READ_ONCE(*slot) : 0);
 }
 EXPORT_SYMBOL(nacc_reclaim_ptp_dtor);
 
@@ -168,9 +160,17 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
        }
 
        if (*slot == pfn) {
-               printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s\n",
-                      pfn, nacc_fork_ptp_level_name(level));
-               return 0;
+               ptdesc = page_ptdesc(pfn_to_page(pfn));
+               if (nacc_ptdesc_raw_ptl(ptdesc)) {
+                       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s ptdesc=%px ptl=%lx\n",
+                              pfn, nacc_fork_ptp_level_name(level),
+                              ptdesc, nacc_ptdesc_raw_ptl(ptdesc));
+                       return 0;
+               }
+
+               printk(KERN_ERR "[Linux]: page_nacc_register_ptp: recovering stale slot for pfn=%lx level=%u(%s)\n",
+                      pfn, level, nacc_fork_ptp_level_name(level));
+               WRITE_ONCE(*slot, 0);
        }
 
        ptdesc = page_ptdesc(pfn_to_page(pfn));

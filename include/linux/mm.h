@@ -2861,11 +2861,6 @@ static inline struct ptdesc *virt_to_ptdesc(const void *x)
 	return page_ptdesc(virt_to_page(x));
 }
 
-static inline struct ptdesc *virt_to_ptdesc_nacc(const void *x)
-{
-	return page_ptdesc(virt_to_page_nacc(x));
-}
-
 static inline void *ptdesc_to_virt(const struct ptdesc *pt)
 {
 	return page_to_virt(ptdesc_page(pt));
@@ -2948,13 +2943,6 @@ static inline spinlock_t *pte_lockptr(struct mm_struct *mm, pmd_t *pmd)
 	return ptlock_ptr(page_ptdesc(pmd_page(*pmd)));
 }
 
-static inline spinlock_t *pte_lockptr_nacc(struct mm_struct *mm, pmd_t *pmd)
-{
-	struct ptdesc *desc = page_ptdesc(pmd_page_nacc(*pmd));
-
-	return ptlock_ptr(desc);
-}
-
 static inline spinlock_t *ptep_lockptr(struct mm_struct *mm, pte_t *pte)
 {
 	BUILD_BUG_ON(IS_ENABLED(CONFIG_HIGHPTE));
@@ -3017,8 +3005,6 @@ static inline void pagetable_pte_dtor(struct ptdesc *ptdesc)
 
 pte_t *__pte_offset_map(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp);
 
-pte_t *__pte_offset_map_nacc(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp);
-
 static inline pte_t *pte_offset_map(pmd_t *pmd, unsigned long addr)
 {
 	return __pte_offset_map(pmd, addr, NULL);
@@ -3069,24 +3055,9 @@ static inline struct ptdesc *pmd_ptdesc(pmd_t *pmd)
 	return page_ptdesc(pmd_pgtable_page(pmd));
 }
 
-static inline struct ptdesc *pmd_ptdesc_nacc(pmd_t *pmd)
-{
-    /* Found the corresponding struct page* for pmd, if it has old pfn mappings */
-    unsigned long mask = ~(PTRS_PER_PMD * sizeof(pmd_t) - 1);
-    unsigned long new_pfn = virt_to_pfn((void *)((unsigned long) pmd & mask));
-    unsigned long actual_pfn = page_nacc_mappings(new_pfn);
-    
-	return page_ptdesc(pfn_to_page(actual_pfn));
-}
-
 static inline spinlock_t *pmd_lockptr(struct mm_struct *mm, pmd_t *pmd)
 {
 	return ptlock_ptr(pmd_ptdesc(pmd));
-}
-
-static inline spinlock_t *pmd_lockptr_nacc(struct mm_struct *mm, pmd_t *pmd)
-{
-	return ptlock_ptr(pmd_ptdesc_nacc(pmd));
 }
 
 static inline bool pmd_ptlock_init(struct ptdesc *ptdesc)
@@ -3125,10 +3096,7 @@ static inline spinlock_t *pmd_lock(struct mm_struct *mm, pmd_t *pmd)
 {
 	spinlock_t *ptl;
 
-	if (nacc_use_secure_pt(mm))
-		ptl = pmd_lockptr_nacc(mm, pmd);
-	else
-		ptl = pmd_lockptr(mm, pmd);
+	ptl = pmd_lockptr(mm, pmd);
 	spin_lock(ptl);
 	return ptl;
 }

@@ -196,18 +196,19 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	pgtable_t token;
 	unsigned long pgtables_before = mm_pgtables_bytes(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
-        // return the old pfn struct page.
-		token = pmd_pgtable_nacc(*pmd);
-        // set the old pfn (pmd) entry to zero
-        // and recliam the new pfn (pte)
-		pmd_clear_nacc(pmd);
+		unsigned long token_pfn;
+
+		token = pmd_pgtable(*pmd);
+		token_pfn = page_to_pfn(token);
+		if (nacc_pfn_is_secure_ptp(token_pfn))
+			nacc_track_secure_ptp_pfn(token_pfn);
+		pmd_clear(pmd);
 		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
 
-		if (page_to_pfn(token) >= NACC_PTP_PFN_BASE
-		    && page_to_pfn(token) < NACC_PTP_PFN_END) {
+		if (nacc_pfn_is_secure_ptp(token_pfn)) {
 			/* Pure NACC PTE page: only do dtor cleanup, skip buddy free */
 			nacc_reclaim_ptp_dtor(page_ptdesc(token),
-					      page_to_pfn(token), 0,
+					      token_pfn, 0,
 					      "free_pte_range");
 		} else {
 			/* Old buddy page: normal buddy free */
@@ -1682,7 +1683,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	int rss[NR_MM_COUNTERS];
 	spinlock_t *ptl;
 	pte_t *start_pte;
-	pte_t *pte, *old_pte;
+	pte_t *pte;
 	swp_entry_t entry;
 	int nr;
 
@@ -1700,9 +1701,6 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	arch_enter_lazy_mmu_mode();
 	do {
 		pte_t ptent = ptep_get(pte);
-       	// if(current->thread.nacc_flag & NACC_RECLAIM) {
-		//     printk(KERN_ERR "ptent: %lx pte_present: %d pte_new: %d !: %d\n", pte_val(ptent), pte_present(ptent), pte_new(ptent), !pte_new(ptent));
-        // } 
 		struct folio *folio;
 		struct page *page;
 		int max_nr;
@@ -1715,31 +1713,13 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 			break;
 
 		if (pte_present(ptent)) {
-            max_nr = (end - addr) / PAGE_SIZE;
-			/* if the pte is new, then we can simply clear it, although it will trigger page fault, the monitor will handle it. */
-            if (nacc_mm_is_active(mm)) {
-                /* if the pte is old, then we found the old PTE and clear it. */
-                if (pte_user(ptent)) {
-                    if (!pte_new(ptent)) {
-                        old_pte = __pte_map_nacc(pmd, addr);
-                        nr = zap_present_ptes(tlb, vma, old_pte, ptent, max_nr,
-                                    addr, details, rss, &force_flush,
-                                    &force_break);
-                    } else {
-                        nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
-                                    addr, details, rss, &force_flush,
-                                    &force_break);
-                    }
-                    goto after_zap_present;
-                }
-            }
-            nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
-					      addr, details, rss, &force_flush,
-					      &force_break);
-after_zap_present:
-			if (unlikely(force_break)) {
-				addr += nr * PAGE_SIZE;
-				break;
+	            max_nr = (end - addr) / PAGE_SIZE;
+		            nr = zap_present_ptes(tlb, vma, pte, ptent, max_nr,
+							      addr, details, rss, &force_flush,
+							      &force_break);
+				if (unlikely(force_break)) {
+					addr += nr * PAGE_SIZE;
+					break;
 			}
 			continue;
 		}

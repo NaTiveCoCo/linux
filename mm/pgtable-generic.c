@@ -282,35 +282,6 @@ static unsigned long pmdp_get_lockless_start(void) { return 0; }
 static void pmdp_get_lockless_end(unsigned long irqflags) { }
 #endif
 
-#ifdef CONFIG_RISCV
-pte_t *__pte_offset_map_nacc(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp)
-{
-	unsigned long irqflags;
-	pmd_t pmdval;
-
-	rcu_read_lock();
-	irqflags = pmdp_get_lockless_start();
-	pmdval = pmdp_get_lockless(pmd);
-	pmdp_get_lockless_end(irqflags);
-
-	if (pmdvalp)
-		*pmdvalp = pmdval;
-	if (unlikely(pmd_none(pmdval) || is_pmd_migration_entry(pmdval)))
-		goto nomap;
-	if (unlikely(pmd_trans_huge(pmdval) || pmd_devmap(pmdval)))
-		goto nomap;
-	if (unlikely(pmd_bad(pmdval))) {
-		pmd_clear_bad(pmd);
-		goto nomap;
-	}
-	return __pte_map_nacc(&pmdval, addr);
-nomap:
-	rcu_read_unlock();
-	return NULL;
-}
-
-#endif
-
 pte_t *__pte_offset_map(pmd_t *pmd, unsigned long addr, pmd_t *pmdvalp)
 {
 	unsigned long irqflags;
@@ -344,13 +315,8 @@ pte_t *pte_offset_map_nolock(struct mm_struct *mm, pmd_t *pmd,
 	pte_t *pte;
 
 	pte = __pte_offset_map(pmd, addr, &pmdval);
-	if (likely(pte)) {
-		if (nacc_use_secure_pt(mm)) {
-			*ptlp = pte_lockptr_nacc(mm, &pmdval);
-		} else {
-			*ptlp = pte_lockptr(mm, &pmdval);
-		}
-	}
+	if (likely(pte))
+		*ptlp = pte_lockptr(mm, &pmdval);
 	return pte;
 }
 
@@ -405,19 +371,10 @@ pte_t *__pte_offset_map_lock(struct mm_struct *mm, pmd_t *pmd,
 	pmd_t pmdval;
 	pte_t *pte;
 again:
-#ifdef CONFIG_RISCV
-	if (unlikely(nacc_use_secure_pt(mm))) {
-		/* Keep walking the new secure PTP content, but borrow old metadata/PTL. */
-		pte = __pte_offset_map(pmd, addr, &pmdval);
-		ptl = pte_lockptr_nacc(mm, &pmdval);
-		goto setlock;
-	}
-#endif
 	pte = __pte_offset_map(pmd, addr, &pmdval);
 	if (unlikely(!pte))
 		return pte;
 	ptl = pte_lockptr(mm, &pmdval);
-setlock:
 	spin_lock(ptl);
 	if (likely(pmd_same(pmdval, pmdp_get_lockless(pmd)))) {
 		*ptlp = ptl;

@@ -18,7 +18,7 @@ struct nacc_reclaim_list {
 #define NACC_PREPARE     0b001
 #define NACC_INITED      0b010
 
-#define NACC_MM_ACTIVE	0x1UL
+#define NACC_MM_ACTIVE		0x1UL
 
 /* 
  * The agent has already been initialized, and the new child process is forked.
@@ -86,12 +86,13 @@ static inline bool nacc_thread_is_inited(void)
 static inline bool nacc_use_secure_pt(struct mm_struct *mm)
 {
 	/*
-	 * Two windows need secure page-table handling:
-	 * - fork/bootstrap construction while the current NaCC thread is
-	 *   still building a child/new mm
-	 * - steady-state or teardown of an mm that already owns secure PTPs
+	 * Secure page-table handling is needed when:
+	 * - the current task already owns secure page tables (fork/COW path)
+	 * - an mm has entered the NaCC secure PTP lifecycle, including a
+	 *   freshly created exec mm before it becomes current
 	 */
-	return nacc_thread_is_inited() || nacc_mm_is_active(mm);
+	return nacc_thread_is_inited() ||
+	       nacc_mm_is_active(mm);
 }
 
 static inline bool nacc_pfn_is_secure_ptp(unsigned long pfn)
@@ -114,8 +115,6 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 
 void pgtbl_debug(unsigned long pgd);
 
-
-unsigned long page_nacc_mappings(unsigned long pfn);
 int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag);

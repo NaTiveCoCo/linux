@@ -252,45 +252,11 @@ static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 
 #ifdef CONFIG_RISCV
 
-#define NACC_BASE_MAPPINGS 0x17ff00000
-#define NACC_MAPPINGS_SIZE 0x100000
-extern unsigned long nacc_mappings_virt;
-
-
-extern unsigned long page_nacc_mappings(unsigned long pfn);
-
 static inline bool nacc_is_secure_ptp_virt(const void *ptr)
 {
 	unsigned long pfn = virt_to_pfn(ptr);
 
 	return nacc_pfn_is_secure_ptp(pfn);
-}
-
-
-static inline void pmd_clear_nacc(pmd_t *pmdp)
-{
-	unsigned long new_pfn = virt_to_pfn((unsigned long)pmdp);
-	unsigned long old_pfn = page_nacc_mappings(new_pfn);
-    printk(KERN_ERR "[pmd_clear_nacc]: new_pfn: %lx, old_pfn: %lx\n", new_pfn, old_pfn);
-    if(old_pfn == new_pfn) {
-        unsigned long pte_pfn = __page_val_to_pfn(pmd_val(*pmdp));
-        if (pte_pfn >= NACC_PTP_PFN_BASE && pte_pfn < NACC_PTP_PFN_END) {
-            add_to_reclaim_list(pte_pfn);
-        }
-        set_pmd(pmdp, __pmd(0));
-        return;
-    }
-	/* 
- 	 * [TODO]
-	 * - according to the pmdp, get the right entry in the old PTP.
-	 * - send the pmdp value (PFN) of the PTE arrays to the monitor,
-	 * to recycle it.
-	 */
-	unsigned long old_pmdp = (unsigned long) pfn_to_virt(old_pfn) + ((unsigned long)pmdp & (PAGE_SIZE - 1));
-	printk(KERN_ERR "[pmd_clear_nacc]: old_pmdp: %lx\n", old_pmdp);
-
-    add_to_reclaim_list(__page_val_to_pfn(pmd_val(*pmdp)));
-	set_pmd((pmd_t *)old_pmdp, __pmd(0));
 }
 #endif
 
@@ -316,33 +282,6 @@ static inline unsigned long _pgd_pfn(pgd_t pgd)
 static inline struct page *pmd_page(pmd_t pmd)
 {
 	return pfn_to_page(__page_val_to_pfn(pmd_val(pmd)));
-}
-
-// static inline unsigned long page_nacc_mappings(unsigned long pfn)
-// {
-// 	unsigned long actual_pfn = 0;
-// 	if(pfn >= NACC_PTP_PFN_BASE && pfn < NACC_PTP_PFN_END) {
-// 		actual_pfn = *((unsigned long *)(nacc_mappings_virt + ((pfn - NACC_PTP_PFN_BASE) << 4)));
-// 	} else {
-// 		actual_pfn = pfn;
-// 	}
-// 	return actual_pfn;
-// }
-static inline unsigned long pmd_page_nacc_mappings(pmd_t pmd)
-{
-	unsigned long actual_pfn;
-	unsigned long pfn = __page_val_to_pfn(pmd_val(pmd));
-	actual_pfn = page_nacc_mappings(pfn);
-	return actual_pfn;
-}
-
-static inline struct page *pmd_page_nacc(pmd_t pmd)
-{
-    unsigned long actual_pfn;
-	actual_pfn = pmd_page_nacc_mappings(pmd);
-    printk(KERN_ERR "[pmd_page_nacc]: pfn: %lx actual_pfn: %lx\n", __page_val_to_pfn(pmd_val(pmd)), actual_pfn);
-
-    return pfn_to_page(actual_pfn);
 }
 
 static inline unsigned long pmd_page_vaddr(pmd_t pmd)
@@ -426,11 +365,6 @@ static inline int pte_present(pte_t pte)
 	return (pte_val(pte) & (_PAGE_PRESENT | _PAGE_PROT_NONE));
 }
 
-static inline int pte_new(pte_t pte)
-{
-    return (pte_val(pte) & _PAGE_NEW) != 0;
-    
-}
 #define pte_accessible pte_accessible
 static inline unsigned long pte_accessible(struct mm_struct *mm, pte_t a)
 {
