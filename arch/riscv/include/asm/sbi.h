@@ -66,7 +66,7 @@ enum sbi_ext_nacc_fid {
     SBI_EXT_LINUX_VERIFY = 0x4,
     SBI_EXT_LINUX_REQ_PTP = 0x5,
     SBI_EXT_NACC_INVOKE_CHILD = 0x6,
-    SBI_EXT_NACC_FORK = 0x7,
+    SBI_EXT_NACC_FORK = 0x7, /* reserved for removed legacy fork-bypass ABI */
     SBI_EXT_NACC_REEXEC = 0x8,
     SBI_EXT_NACC_SET_PTES = 0x9,
     SBI_EXT_NACC_WRPROTECT_PTES = 0xa,

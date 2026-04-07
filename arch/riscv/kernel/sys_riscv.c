@@ -26,23 +26,8 @@
 #define NACC_AGENT_MEM_SIZE        0x20000000
 #define NACC_AGENT_SLOT_SIZE       0x40000000UL
 #define NACC_AGENT_TOP_GAP         0x100000000UL
-#define NACC_FORK_PTP_LIST_PAGES   2
-
-extern unsigned long nacc_mappings_virt;
-
 extern char do_irq[];
 extern char excp_vect_table[];
-
-static const char *nacc_fork_filter_type_name(unsigned long type)
-{
-    if (type & NACC_FORK_RANGE_VM_NACC)
-        return "vm_nacc";
-    if (type & NACC_FORK_RANGE_DONTCOPY)
-        return "dontcopy";
-    if (type & NACC_FORK_RANGE_WIPEONFORK)
-        return "wipeonfork";
-    return "unknown";
-}
 
 static unsigned long nacc_fixed_agent_base(void)
 {
@@ -452,73 +437,6 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
         printk(KERN_ERR "[Linux]: early fork child pid registration failed: parent pid=%d child_pid=%lu cid=%lx err=%ld val=%ld\n",
                current->pid, child_pid, cid, ret.error, ret.value);
     }
-}
-
-/*
- * Legacy fork-bypass path kept only to preserve the old Linux/OpenSBI ABI
- * while the current fork mainline uses standard page-table allocation and PTE
- * install hooks to build secure child page tables.
- */
-int __maybe_unused nacc_fork(unsigned long parent_pgd_pa,
-			     unsigned long child_pgd_pa,
-			     struct nacc_fork_filter *filter,
-			     unsigned long filter_bytes,
-			     struct mm_struct *child_mm)
-{
-    unsigned long ptp_list_bytes = PAGE_SIZE * NACC_FORK_PTP_LIST_PAGES;
-    struct nacc_fork_ptp_list *ptp_list;
-    unsigned long capacity;
-    unsigned long filter_nr = filter ? filter->nr_ranges : 0;
-    struct sbiret ret;
-    int rc;
-
-    printk(KERN_ERR "[Linux]: nacc_fork: parent_pgd=%lx child_pgd=%lx filter=%px filter_bytes=%lu filter_nr=%lu\n",
-           parent_pgd_pa, child_pgd_pa, filter, filter_bytes, filter_nr);
-    if (filter) {
-        unsigned long i;
-
-        for (i = 0; i < filter_nr; i++) {
-            struct nacc_fork_range *range = &filter->ranges[i];
-
-            printk(KERN_ERR "[Linux]: nacc_fork: filter[%lu] %s [%lx, %lx) type=%lx\n",
-                   i, nacc_fork_filter_type_name(range->type),
-                   range->start, range->end, range->type);
-        }
-    }
-    ptp_list = kzalloc(ptp_list_bytes, GFP_KERNEL);
-    if (!ptp_list)
-        return -ENOMEM;
-
-    capacity = (ptp_list_bytes - sizeof(*ptp_list)) /
-               sizeof(ptp_list->entries[0]);
-
-    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK, parent_pgd_pa,
-                    child_pgd_pa, virt_to_phys(ptp_list), ptp_list_bytes,
-                    filter ? virt_to_phys(filter) : 0, filter_bytes);
-    if (ret.error) {
-        printk(KERN_ERR "[Linux]: nacc_fork failed: sbi error=%ld value=%ld\n",
-               ret.error, ret.value);
-        kfree(ptp_list);
-        return -EIO;
-    }
-
-    rc = nacc_register_fork_ptp_list(child_mm, ptp_list, ptp_list_bytes);
-    if (rc) {
-        printk(KERN_ERR "[Linux]: nacc_fork ptp_list register failed: %d "
-               "(nr=%u cap=%lu)\n",
-               rc, ptp_list->nr_entries, capacity);
-        kfree(ptp_list);
-        return rc;
-    }
-
-    printk(KERN_ERR "[Linux]: nacc_fork ptp_list entries=%u\n",
-           ptp_list->nr_entries);
-    printk(KERN_ERR "[Linux]: nacc_fork child mm=%px pgtables_bytes=%lu after ptp_list registration\n",
-           child_mm, child_mm ? mm_pgtables_bytes(child_mm) : 0);
-    kfree(ptp_list);
-
-    printk(KERN_ERR "[Linux]: nacc_fork done.\n");
-    return 0;
 }
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,

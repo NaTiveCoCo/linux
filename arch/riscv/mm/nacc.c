@@ -10,7 +10,7 @@
 
 extern unsigned long nacc_mappings_virt;
 
-static const char *nacc_fork_ptp_level_name(unsigned int level)
+static const char *nacc_ptp_level_name(unsigned int level)
 {
        if (level == 1)
                return "pmd";
@@ -28,7 +28,7 @@ static void nacc_dump_ptdesc_state(const char *tag, unsigned long pfn,
        mapcount = page_mapcount_is_type(mapcount) ? 0 : mapcount + 1;
 
        printk(KERN_ERR "[Linux]: %s: pfn=%lx level=%u(%s) ptdesc=%px ptl=%px flags=%lx page_type=%x refcount=%d mapcount=%d\n",
-              tag, pfn, level, nacc_fork_ptp_level_name(level), ptdesc,
+              tag, pfn, level, nacc_ptp_level_name(level), ptdesc,
               ptlock_ptr(ptdesc), ptdesc->__page_flags, ptdesc->__page_type,
               atomic_read(&ptdesc->__page_refcount), mapcount);
 }
@@ -155,7 +155,7 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
 
        if (*slot && *slot != pfn) {
                printk(KERN_ERR "[Linux]: page_nacc_register_ptp: conflicting mapping pfn=%lx slot=%lx level=%u(%s)\n",
-                      pfn, *slot, level, nacc_fork_ptp_level_name(level));
+                      pfn, *slot, level, nacc_ptp_level_name(level));
                return -EINVAL;
        }
 
@@ -163,13 +163,13 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
                ptdesc = page_ptdesc(pfn_to_page(pfn));
                if (nacc_ptdesc_raw_ptl(ptdesc)) {
                        printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s ptdesc=%px ptl=%lx\n",
-                              pfn, nacc_fork_ptp_level_name(level),
+                              pfn, nacc_ptp_level_name(level),
                               ptdesc, nacc_ptdesc_raw_ptl(ptdesc));
                        return 0;
                }
 
                printk(KERN_ERR "[Linux]: page_nacc_register_ptp: recovering stale slot for pfn=%lx level=%u(%s)\n",
-                      pfn, level, nacc_fork_ptp_level_name(level));
+                      pfn, level, nacc_ptp_level_name(level));
                WRITE_ONCE(*slot, 0);
        }
 
@@ -217,53 +217,3 @@ int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
 	return __page_nacc_register_ptp(NULL, pfn, level);
 }
 EXPORT_SYMBOL(page_nacc_register_ptp);
-
-int nacc_register_fork_ptp_list(struct mm_struct *mm,
-				struct nacc_fork_ptp_list *ptp_list,
-				unsigned long ptp_list_bytes)
-{
-	unsigned long capacity;
-	unsigned long nr_entries;
-	unsigned long i;
-
-	if (!ptp_list || ptp_list_bytes < sizeof(*ptp_list))
-		return -EINVAL;
-
-	capacity = (ptp_list_bytes - sizeof(*ptp_list)) /
-		   sizeof(ptp_list->entries[0]);
-	if (ptp_list->nr_entries > capacity)
-		return -EOVERFLOW;
-
-	nr_entries = ptp_list->nr_entries;
-	if (mm) {
-		printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: mm=%px nr_entries=%lu pgtables_bytes(before)=%lu\n",
-		       mm, nr_entries, mm_pgtables_bytes(mm));
-	}
-	for (i = 0; i < nr_entries; i++) {
-		unsigned long packed = ptp_list->entries[i];
-		unsigned long new_pfn = NACC_FORK_PTP_DECODE_PFN(packed);
-		unsigned int level = NACC_FORK_PTP_DECODE_LEVEL(packed);
-		struct ptdesc *ptdesc;
-		unsigned long *slot;
-
-		if (new_pfn < NACC_PTP_PFN_BASE || new_pfn >= NACC_PTP_PFN_END)
-			return -EINVAL;
-
-        slot = nacc_mapping_slot(new_pfn);
-        if (!slot)
-            return -EINVAL;
-		ptdesc = page_ptdesc(pfn_to_page(new_pfn));
-        nacc_dump_ptdesc_state("nacc_register_fork_ptp_list: entry",
-                                new_pfn, level, ptdesc);
-	        if (__page_nacc_register_ptp(mm, new_pfn, level)) {
-            printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: register failed for pfn=%lx level=%u packed=%lx\n",
-                       new_pfn, level, packed);
-            return -EINVAL;
-	    }
-    }
-	if (mm) {
-		printk(KERN_ERR "[Linux]: nacc_register_fork_ptp_list: mm=%px pgtables_bytes(after)=%lu\n",
-		       mm, mm_pgtables_bytes(mm));
-	}
-	return 0;
-}

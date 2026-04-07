@@ -35,42 +35,6 @@ struct nacc_reclaim_list {
 #define NACC_PTP_PFN_BASE  0x1b0000
 #define NACC_PTP_PFN_END   0x1c0000
 
-#define NACC_FORK_PTP_LEVEL_MASK	0x3UL
-#define NACC_FORK_PTP_ENCODE(new_pfn, level) \
-	((((unsigned long)(new_pfn)) << 2) | \
-	 ((unsigned long)(level) & NACC_FORK_PTP_LEVEL_MASK))
-#define NACC_FORK_PTP_DECODE_PFN(entry)	((unsigned long)(entry) >> 2)
-#define NACC_FORK_PTP_DECODE_LEVEL(entry) \
-	((unsigned int)((entry) & NACC_FORK_PTP_LEVEL_MASK))
-
-/*
- * NaCC fork PTP list:
- * OpenSBI fills child-owned non-leaf page-table pages that Linux must
- * register with the proper pagetable ctor. Each list element is a packed
- * 64-bit value holding new_pfn and level.
- */
-struct nacc_fork_ptp_list {
-	unsigned int nr_entries;
-	unsigned int reserved;
-	unsigned long entries[];
-};
-
-#define NACC_FORK_RANGE_DONTCOPY	0x1UL
-#define NACC_FORK_RANGE_WIPEONFORK	0x2UL
-#define NACC_FORK_RANGE_VM_NACC         0x4UL
-
-struct nacc_fork_range {
-	unsigned long start;
-	unsigned long end;
-	unsigned long type;
-};
-
-struct nacc_fork_filter {
-	unsigned int nr_ranges;
-	unsigned int reserved;
-	struct nacc_fork_range ranges[];
-};
-
 void add_to_reclaim_list(unsigned long pfn);
 void flush_reclaim_list(void);
 
@@ -118,20 +82,6 @@ void pgtbl_debug(unsigned long pgd);
 int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag);
-
-int nacc_register_fork_ptp_list(struct mm_struct *mm,
-				struct nacc_fork_ptp_list *ptp_list,
-				unsigned long ptp_list_bytes);
-
-/*
- * Legacy fork-bypass path. Current fork mainline relies on standard Linux
- * dup_mmap/copy_page_range hooks instead of calling this helper directly.
- */
-int __maybe_unused nacc_fork(unsigned long parent_pgd_pa,
-			     unsigned long child_pgd_pa,
-			     struct nacc_fork_filter *filter,
-			     unsigned long filter_bytes,
-			     struct mm_struct *child_mm);
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr);
