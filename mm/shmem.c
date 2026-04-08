@@ -40,9 +40,50 @@
 #include <linux/fs_parser.h>
 #include <linux/swapfile.h>
 #include <linux/iversion.h>
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
 #include "swap.h"
 
 static struct vfsmount *shm_mnt __ro_after_init;
+
+#ifdef CONFIG_RISCV
+static inline bool nacc_trace_shmem_path(struct mm_struct *mm)
+{
+	if (!mm)
+		return false;
+
+	return nacc_mm_is_active(mm) || nacc_thread_is_inited();
+}
+
+static void nacc_log_shmem_path(const char *tag, struct file *file,
+				unsigned long addr, unsigned long len,
+				unsigned long pgoff, unsigned long flags,
+				long extra)
+{
+	struct mm_struct *mm = current->mm;
+
+	if (!nacc_trace_shmem_path(mm))
+		return;
+
+	printk(KERN_ERR "[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx file=%px "
+	       "addr=%lx len=%lx pgoff=%lx flags=%lx extra=%ld\n",
+	       tag, current->pid, mm, current->thread.nacc_flag,
+	       nacc_mm_state(mm), file, addr, len, pgoff, flags, extra);
+}
+#else
+static inline bool nacc_trace_shmem_path(struct mm_struct *mm)
+{
+	return false;
+}
+
+static inline void nacc_log_shmem_path(const char *tag, struct file *file,
+				       unsigned long addr, unsigned long len,
+				       unsigned long pgoff, unsigned long flags,
+				       long extra)
+{
+}
+#endif
 
 #ifdef CONFIG_SHMEM
 /*
@@ -2550,11 +2591,20 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 	unsigned long inflated_offset;
 	unsigned long hpage_size;
 
-	if (len > TASK_SIZE)
+	nacc_log_shmem_path("shmem_get_unmapped_area: enter", file, uaddr, len,
+			    pgoff, flags, 0);
+
+	if (len > TASK_SIZE) {
+		nacc_log_shmem_path("shmem_get_unmapped_area: len > TASK_SIZE",
+				    file, uaddr, len, pgoff, flags, TASK_SIZE);
 		return -ENOMEM;
+	}
 
 	addr = mm_get_unmapped_area(current->mm, file, uaddr, len, pgoff,
 				    flags);
+	if (IS_ERR_VALUE(addr))
+		nacc_log_shmem_path("shmem_get_unmapped_area: base search failed",
+				    file, addr, len, pgoff, flags, (long)addr);
 
 	if (!IS_ENABLED(CONFIG_TRANSPARENT_HUGEPAGE))
 		return addr;
@@ -2634,8 +2684,12 @@ unsigned long shmem_get_unmapped_area(struct file *file,
 
 	inflated_addr = mm_get_unmapped_area(current->mm, NULL, uaddr,
 					     inflated_len, 0, flags);
-	if (IS_ERR_VALUE(inflated_addr))
+	if (IS_ERR_VALUE(inflated_addr)) {
+		nacc_log_shmem_path("shmem_get_unmapped_area: huge fallback search failed",
+				    file, inflated_addr, inflated_len, 0, flags,
+				    (long)inflated_addr);
 		return addr;
+	}
 	if (inflated_addr & ~PAGE_MASK)
 		return addr;
 
@@ -2727,9 +2781,17 @@ static int shmem_mmap(struct file *file, struct vm_area_struct *vma)
 	struct shmem_inode_info *info = SHMEM_I(inode);
 	int ret;
 
+	nacc_log_shmem_path("shmem_mmap: enter", file, vma->vm_start,
+			    vma->vm_end - vma->vm_start, vma->vm_pgoff,
+			    vma->vm_flags, inode->i_nlink);
+
 	ret = seal_check_write(info->seals, vma);
-	if (ret)
+	if (ret) {
+		nacc_log_shmem_path("shmem_mmap: seal_check_write failed", file,
+				    vma->vm_start, vma->vm_end - vma->vm_start,
+				    vma->vm_pgoff, vma->vm_flags, ret);
 		return ret;
+	}
 
 	file_accessed(file);
 	/* This is anonymous shared memory if it is unlinked at the time of mmap */

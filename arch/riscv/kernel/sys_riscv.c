@@ -72,6 +72,29 @@ static void nacc_fail_fork_child_attach(const char *reason, long err,
     force_exit_sig(SIGKILL);
 }
 
+static inline bool nacc_trace_mmap_syscall(void)
+{
+	return current->mm &&
+	       (nacc_mm_is_active(current->mm) || nacc_thread_is_inited());
+}
+
+static void nacc_log_sys_mmap(const char *tag, unsigned long addr,
+			      unsigned long len, unsigned long prot,
+			      unsigned long flags, unsigned long fd,
+			      off_t offset, unsigned long page_shift_offset,
+			      long ret)
+{
+	if (!nacc_trace_mmap_syscall())
+		return;
+
+	printk(KERN_ERR "[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx "
+	       "addr=%lx len=%lx prot=%lx flags=%lx fd=%lx offset=%llx "
+	       "shift=%lu ret=%ld\n",
+	       tag, current->pid, current->mm, current->thread.nacc_flag,
+	       nacc_mm_state(current->mm), addr, len, prot, flags, fd,
+	       (unsigned long long)offset, page_shift_offset, ret);
+}
+
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 {
     unsigned long virt_agent;
@@ -209,11 +232,23 @@ static long riscv_sys_mmap(unsigned long addr, unsigned long len,
 			   unsigned long fd, off_t offset,
 			   unsigned long page_shift_offset)
 {
-	if (unlikely(offset & (~PAGE_MASK >> page_shift_offset)))
-		return -EINVAL;
+	long ret;
 
-	return ksys_mmap_pgoff(addr, len, prot, flags, fd,
-			       offset >> (PAGE_SHIFT - page_shift_offset));
+	nacc_log_sys_mmap("riscv_sys_mmap: enter", addr, len, prot, flags, fd,
+			  offset, page_shift_offset, 0);
+
+	if (unlikely(offset & (~PAGE_MASK >> page_shift_offset))) {
+		nacc_log_sys_mmap("riscv_sys_mmap: bad offset", addr, len, prot,
+				  flags, fd, offset, page_shift_offset,
+				  -EINVAL);
+		return -EINVAL;
+	}
+
+	ret = ksys_mmap_pgoff(addr, len, prot, flags, fd,
+			     offset >> (PAGE_SHIFT - page_shift_offset));
+	nacc_log_sys_mmap("riscv_sys_mmap: return", addr, len, prot, flags, fd,
+			  offset, page_shift_offset, ret);
+	return ret;
 }
 
 #ifdef CONFIG_64BIT

@@ -674,10 +674,12 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 			if (retval)
 				goto loop_out;
 
-			vm_stat_account(mm, mpnt->vm_flags, -vma_pages(mpnt));
 			if (mpnt->vm_flags & VM_NACC)
 				printk(KERN_ERR "[Linux]: dup_mmap: dropping inherited VM_NACC VMA [%lx, %lx) from child mm\n",
 				       mpnt->vm_start, mpnt->vm_end);
+			else
+				vm_stat_account(mm, mpnt->vm_flags,
+						-vma_pages(mpnt));
 			continue;
 		}
 		charge = 0;

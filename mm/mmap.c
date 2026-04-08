@@ -64,6 +64,92 @@
 #define arch_mmap_check(addr, len, flags)	(0)
 #endif
 
+#ifdef CONFIG_RISCV
+static inline bool nacc_trace_mmap_syscall(struct mm_struct *mm)
+{
+	if (!mm)
+		return false;
+
+	return nacc_mm_is_active(mm) || nacc_thread_is_inited();
+}
+
+static inline bool nacc_trace_shmem_mmap(struct mm_struct *mm, struct file *file)
+{
+	if (!file)
+		return false;
+
+	if (!nacc_trace_mmap_syscall(mm))
+		return false;
+
+	return shmem_mapping(file->f_mapping);
+}
+
+static void nacc_log_mmap_syscall_state(const char *tag, struct mm_struct *mm,
+					struct file *file, unsigned long fd,
+					unsigned long addr, unsigned long len,
+					unsigned long pgoff, unsigned long flags,
+					unsigned long prot, long ret)
+{
+	bool is_shmem = false;
+
+	if (!nacc_trace_mmap_syscall(mm))
+		return;
+
+	if (file)
+		is_shmem = shmem_mapping(file->f_mapping);
+
+	printk(KERN_ERR "[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx "
+	       "fd=%lx file=%px shmem=%d addr=%lx len=%lx pgoff=%lx "
+	       "prot=%lx flags=%lx ret=%ld\n",
+	       tag, current->pid, mm, current->thread.nacc_flag,
+	       nacc_mm_state(mm), fd, file, is_shmem, addr, len, pgoff,
+	       prot, flags, ret);
+}
+
+static void nacc_log_shmem_mmap_state(const char *tag, struct mm_struct *mm,
+				      struct file *file, unsigned long addr,
+				      unsigned long len, unsigned long pgoff,
+				      unsigned long flags, vm_flags_t vm_flags,
+				      long extra)
+{
+	if (!nacc_trace_shmem_mmap(mm, file))
+		return;
+
+	printk(KERN_ERR "[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx file=%px "
+	       "addr=%lx len=%lx pgoff=%lx flags=%lx vm_flags=%lx total_vm=%lu "
+	       "data_vm=%lu map_count=%d extra=%ld\n",
+	       tag, current->pid, mm, current->thread.nacc_flag,
+	       nacc_mm_state(mm), file, addr, len, pgoff, flags, vm_flags,
+	       mm->total_vm, mm->data_vm, mm->map_count, extra);
+}
+#else
+static inline bool nacc_trace_mmap_syscall(struct mm_struct *mm)
+{
+	return false;
+}
+
+static inline bool nacc_trace_shmem_mmap(struct mm_struct *mm, struct file *file)
+{
+	return false;
+}
+
+static inline void nacc_log_mmap_syscall_state(const char *tag, struct mm_struct *mm,
+					       struct file *file, unsigned long fd,
+					       unsigned long addr, unsigned long len,
+					       unsigned long pgoff, unsigned long flags,
+					       unsigned long prot, long ret)
+{
+}
+
+static inline void nacc_log_shmem_mmap_state(const char *tag, struct mm_struct *mm,
+					     struct file *file, unsigned long addr,
+					     unsigned long len, unsigned long pgoff,
+					     unsigned long flags, vm_flags_t vm_flags,
+					     long extra)
+{
+}
+#endif
+
 #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
 const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;
 int mmap_rnd_bits_max __ro_after_init = CONFIG_ARCH_MMAP_RND_BITS_MAX;
@@ -293,6 +379,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	*populate = 0;
 
+	nacc_log_shmem_mmap_state("do_mmap: enter", mm, file, addr, len, pgoff,
+				  flags, vm_flags, prot);
+
 	if (!len)
 		return -EINVAL;
 
@@ -315,16 +404,23 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 
 	/* Careful about overflows.. */
 	len = PAGE_ALIGN(len);
-	if (!len)
+	if (!len) {
+		nacc_log_shmem_mmap_state("do_mmap: PAGE_ALIGN(len)==0", mm, file,
+					  addr, len, pgoff, flags, vm_flags, 0);
 		return -ENOMEM;
+	}
 
 	/* offset overflow? */
 	if ((pgoff + (len >> PAGE_SHIFT)) < pgoff)
 		return -EOVERFLOW;
 
 	/* Too many mappings? */
-	if (mm->map_count > sysctl_max_map_count)
+	if (mm->map_count > sysctl_max_map_count) {
+		nacc_log_shmem_mmap_state("do_mmap: max_map_count exceeded", mm,
+					  file, addr, len, pgoff, flags, vm_flags,
+					  sysctl_max_map_count);
 		return -ENOMEM;
+	}
 
 	/*
 	 * addr is returned from get_unmapped_area,
@@ -353,8 +449,12 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	 * that it represents a valid section of the address space.
 	 */
 	addr = __get_unmapped_area(file, addr, len, pgoff, flags, vm_flags);
-	if (IS_ERR_VALUE(addr))
+	if (IS_ERR_VALUE(addr)) {
+		nacc_log_shmem_mmap_state("__get_unmapped_area: error", mm, file,
+					  addr, len, pgoff, flags, vm_flags,
+					  (long)addr);
 		return addr;
+	}
 
 	if (flags & MAP_FIXED_NOREPLACE) {
 		if (find_vma_intersection(mm, addr, addr + len))
@@ -496,6 +596,9 @@ unsigned long do_mmap(struct file *file, unsigned long addr,
 	}
 
 	addr = mmap_region(file, addr, len, vm_flags, pgoff, uf);
+	if (IS_ERR_VALUE(addr))
+		nacc_log_shmem_mmap_state("mmap_region: error", mm, file, addr,
+					  len, pgoff, flags, vm_flags, (long)addr);
 	if (!IS_ERR_VALUE(addr) &&
 	    ((vm_flags & VM_LOCKED) ||
 	     (flags & (MAP_POPULATE | MAP_NONBLOCK)) == MAP_POPULATE))
@@ -509,16 +612,29 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 {
 	struct file *file = NULL;
 	unsigned long retval;
+	struct mm_struct *mm = current->mm;
+
+	nacc_log_mmap_syscall_state("ksys_mmap_pgoff: enter", mm, NULL, fd, addr,
+				    len, pgoff, flags, prot, 0);
 
 	if (!(flags & MAP_ANONYMOUS)) {
 		audit_mmap_fd(fd, flags);
 		file = fget(fd);
-		if (!file)
+		if (!file) {
+			nacc_log_mmap_syscall_state("ksys_mmap_pgoff: fget failed",
+						    mm, NULL, fd, addr, len, pgoff,
+						    flags, prot, -EBADF);
 			return -EBADF;
+		}
+		nacc_log_mmap_syscall_state("ksys_mmap_pgoff: fget ok", mm, file,
+					    fd, addr, len, pgoff, flags, prot, 0);
 		if (is_file_hugepages(file)) {
 			len = ALIGN(len, huge_page_size(hstate_file(file)));
 		} else if (unlikely(flags & MAP_HUGETLB)) {
 			retval = -EINVAL;
+			nacc_log_mmap_syscall_state("ksys_mmap_pgoff: huge flag mismatch",
+						    mm, file, fd, addr, len, pgoff,
+						    flags, prot, retval);
 			goto out_fput;
 		}
 	} else if (flags & MAP_HUGETLB) {
@@ -537,11 +653,20 @@ unsigned long ksys_mmap_pgoff(unsigned long addr, unsigned long len,
 				VM_NORESERVE,
 				HUGETLB_ANONHUGE_INODE,
 				(flags >> MAP_HUGE_SHIFT) & MAP_HUGE_MASK);
-		if (IS_ERR(file))
+		if (IS_ERR(file)) {
+			nacc_log_mmap_syscall_state("ksys_mmap_pgoff: hugetlb_file_setup failed",
+						    mm, NULL, fd, addr, len, pgoff,
+						    flags, prot, PTR_ERR(file));
 			return PTR_ERR(file);
+		}
+		nacc_log_mmap_syscall_state("ksys_mmap_pgoff: hugetlb_file_setup ok",
+					    mm, file, fd, addr, len, pgoff,
+					    flags, prot, 0);
 	}
 
 	retval = vm_mmap_pgoff(file, addr, len, prot, flags, pgoff);
+	nacc_log_mmap_syscall_state("ksys_mmap_pgoff: return", mm, file, fd, addr,
+				    len, pgoff, flags, prot, retval);
 out_fput:
 	if (file)
 		fput(file);
@@ -894,6 +1019,7 @@ unsigned long
 __get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 		unsigned long pgoff, unsigned long flags, vm_flags_t vm_flags)
 {
+	struct mm_struct *mm = current->mm;
 	unsigned long (*get_area)(struct file *, unsigned long,
 				  unsigned long, unsigned long, unsigned long)
 				  = NULL;
@@ -903,8 +1029,12 @@ __get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 		return error;
 
 	/* Careful about overflows.. */
-	if (len > TASK_SIZE)
+	if (len > TASK_SIZE) {
+		nacc_log_shmem_mmap_state("__get_unmapped_area: len > TASK_SIZE",
+					  mm, file, addr, len, pgoff, flags,
+					  vm_flags, TASK_SIZE);
 		return -ENOMEM;
+	}
 
 	if (file) {
 		if (file->f_op->get_unmapped_area)
@@ -935,8 +1065,12 @@ __get_unmapped_area(struct file *file, unsigned long addr, unsigned long len,
 	if (IS_ERR_VALUE(addr))
 		return addr;
 
-	if (addr > TASK_SIZE - len)
+	if (addr > TASK_SIZE - len) {
+		nacc_log_shmem_mmap_state("__get_unmapped_area: addr overflow",
+					  mm, file, addr, len, pgoff, flags,
+					  vm_flags, TASK_SIZE);
 		return -ENOMEM;
+	}
 	if (offset_in_page(addr))
 		return -EINVAL;
 
@@ -1419,6 +1553,9 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 
 	/* Check against address space limit. */
 	if (!may_expand_vm(mm, vm_flags, pglen - vms.nr_pages)) {
+		nacc_log_shmem_mmap_state("__mmap_region: may_expand_vm failed",
+					  mm, file, addr, len, pgoff, 0,
+					  vm_flags, pglen - vms.nr_pages);
 		error = -ENOMEM;
 		goto abort_munmap;
 	}
@@ -1457,6 +1594,9 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	 */
 	vma = vm_area_alloc(mm);
 	if (!vma) {
+		nacc_log_shmem_mmap_state("__mmap_region: vm_area_alloc failed",
+					  mm, file, addr, len, pgoff, 0,
+					  vm_flags, 0);
 		error = -ENOMEM;
 		goto unacct_error;
 	}
@@ -1467,6 +1607,9 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	vma->vm_page_prot = vm_get_page_prot(vm_flags);
 
 	if (vma_iter_prealloc(&vmi, vma)) {
+		nacc_log_shmem_mmap_state("__mmap_region: vma_iter_prealloc failed",
+					  mm, file, addr, len, pgoff, 0,
+					  vm_flags, 0);
 		error = -ENOMEM;
 		goto free_vma;
 	}
@@ -1474,8 +1617,12 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	if (file) {
 		vma->vm_file = get_file(file);
 		error = mmap_file(file, vma);
-		if (error)
+		if (error) {
+			nacc_log_shmem_mmap_state("__mmap_region: mmap_file failed",
+						  mm, file, addr, len, pgoff, 0,
+						  vm_flags, error);
 			goto unmap_and_free_file_vma;
+		}
 
 		/* Drivers cannot alter the address of the VMA. */
 		WARN_ON_ONCE(addr != vma->vm_start);
