@@ -499,6 +499,36 @@ void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr)
 	}
 }
 
+int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)
+{
+	struct sbiret ret;
+
+	if (!pgd_pa || !cid)
+		return -EINVAL;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_TAG_ROOT, pgd_pa,
+			cid, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_tag_root_sbi failed: pgd_pa=%lx cid=%lx err=%ld val=%ld\n",
+		       pgd_pa, cid, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+void nacc_retire_root_sbi(unsigned long pgd_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RETIRE_ROOT, pgd_pa,
+			0, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_retire_root_sbi failed: pgd_pa=%lx err=%ld val=%ld\n",
+		       pgd_pa, ret.error, ret.value);
+	}
+}
+
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;

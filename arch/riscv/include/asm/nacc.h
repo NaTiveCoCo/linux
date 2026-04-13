@@ -19,6 +19,7 @@ struct nacc_reclaim_list {
 #define NACC_INITED      0b010
 
 #define NACC_MM_ACTIVE		0x1UL
+#define NACC_MM_ROOT_TAGGED	0x2UL
 
 /* 
  * The agent has already been initialized, and the new child process is forked.
@@ -47,6 +48,14 @@ static inline bool nacc_thread_is_inited(void)
 	return !!(current->thread.nacc_flag & NACC_INITED);
 }
 
+static inline bool nacc_thread_has_root_l0_lifecycle(void)
+{
+	unsigned long flag = current->thread.nacc_flag;
+
+	return flag == NACC_PREPARE || flag == NACC_FORKED ||
+	       flag == NACC_EXEC || !!(flag & NACC_INITED);
+}
+
 static inline bool nacc_use_secure_pt(struct mm_struct *mm)
 {
 	/*
@@ -62,6 +71,11 @@ static inline bool nacc_use_secure_pt(struct mm_struct *mm)
 static inline bool nacc_pfn_is_secure_ptp(unsigned long pfn)
 {
 	return pfn >= NACC_PTP_PFN_BASE && pfn < NACC_PTP_PFN_END;
+}
+
+static inline bool nacc_mm_root_tagged(struct mm_struct *mm)
+{
+	return !!(nacc_mm_state(mm) & NACC_MM_ROOT_TAGGED);
 }
 
 static inline void nacc_track_secure_ptp_pfn(unsigned long pfn)
@@ -86,6 +100,8 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr);
 void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr);
+int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
+void nacc_retire_root_sbi(unsigned long pgd_pa);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
