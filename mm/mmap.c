@@ -1771,6 +1771,9 @@ unsigned long mmap_region(struct file *file, unsigned long addr,
 	}
 
 	ret = __mmap_region(file, addr, len, vm_flags, pgoff, uf);
+	if (!IS_ERR_VALUE(ret))
+		nacc_region_sync_mm_locked(current->mm,
+					   NACC_REGION_SYNC_REASON_MMAP);
 
 	/* Clear our write mapping regardless of error. */
 	if (writable_file_mapping)
@@ -1784,14 +1787,18 @@ static int __vm_munmap(unsigned long start, size_t len, bool unlock)
 {
 	int ret;
 	struct mm_struct *mm = current->mm;
+	bool need_region_sync = nacc_mm_needs_region_sync(mm);
 	LIST_HEAD(uf);
 	VMA_ITERATOR(vmi, mm, start);
 
 	if (mmap_write_lock_killable(mm))
 		return -EINTR;
 
-	ret = do_vmi_munmap(&vmi, mm, start, len, &uf, unlock);
-	if (ret || !unlock)
+	ret = do_vmi_munmap(&vmi, mm, start, len, &uf,
+			    need_region_sync ? false : unlock);
+	if (!ret && need_region_sync)
+		nacc_region_sync_mm_locked(mm, NACC_REGION_SYNC_REASON_MUNMAP);
+	if (ret || !unlock || need_region_sync)
 		mmap_write_unlock(mm);
 
 	userfaultfd_unmap_complete(mm, &uf);
@@ -2048,6 +2055,8 @@ int vm_brk_flags(unsigned long addr, unsigned long request, unsigned long flags)
 
 	vma = vma_prev(&vmi);
 	ret = do_brk_flags(&vmi, vma, addr, len, flags);
+	if (!ret)
+		nacc_region_sync_mm_locked(mm, NACC_REGION_SYNC_REASON_BRK);
 	populate = ((mm->def_flags & VM_LOCKED) != 0);
 	mmap_write_unlock(mm);
 	userfaultfd_unmap_complete(mm, &uf);
@@ -2086,6 +2095,10 @@ void exit_mmap(struct mm_struct *mm)
 
 	mmap_read_lock(mm);
 	arch_exit_mmap(mm);
+	if (nacc_region_clear_mm_locked(mm,
+					NACC_REGION_SYNC_REASON_EXIT_MMAP))
+		printk(KERN_ERR "[Linux]: exit_mmap region clear failed for mm=%px pgd=%px\n",
+		       mm, mm->pgd);
 
 	vma = vma_next(&vmi);
 	if (!vma || unlikely(xa_is_zero(vma))) {

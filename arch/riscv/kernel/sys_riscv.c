@@ -218,6 +218,9 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     printk(KERN_ERR "[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
 
     nacc_activate_current_mm(tag);
+    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_INVOKE))
+        printk(KERN_ERR "[Linux]: %s region sync failed for mm=%px\n",
+               tag, current->mm);
 
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
@@ -333,6 +336,9 @@ void nacc_exec(void)
      * seeing the transient REEXEC flag forever.
      */
     nacc_activate_current_mm("nacc_exec");
+    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
+        printk(KERN_ERR "[Linux]: nacc_exec region sync failed for mm=%px\n",
+               current->mm);
     current->thread.nacc_flag = NACC_INITED;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REEXEC, virt_agent, pid,
@@ -372,6 +378,9 @@ void nacc_invoke_child(void)
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
      * The remaining args are unused since we don't jump into agent. */
     nacc_activate_current_mm("nacc_invoke_child");
+    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
+        printk(KERN_ERR "[Linux]: nacc_invoke_child region sync failed for mm=%px\n",
+               current->mm);
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
               cid, 0, 0, 0);
 
@@ -426,6 +435,9 @@ void nacc_attach_forked_child_if_needed(void)
     }
 
     nacc_activate_current_mm("nacc_attach_forked_child");
+    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_FORK))
+        printk(KERN_ERR "[Linux]: fork child attach region sync failed for mm=%px\n",
+               current->mm);
     /*
      * Child attach now follows the same non-returning lightweight agent shape
      * as exec attach: OpenSBI enters the agent and the agent returns directly
@@ -475,15 +487,17 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
 }
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
-		       unsigned int nr)
+		       unsigned int nr, unsigned long start_va,
+		       unsigned long root_pgd_pa)
 {
 	struct sbiret ret;
 
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_SET_PTES, ptep_pa,
-			pteval, nr, 0, 0, 0);
+			pteval, nr, start_va, root_pgd_pa, 0);
 	if (ret.error) {
-		printk(KERN_ERR "[Linux]: nacc_set_ptes_sbi failed: ptep_pa=%lx pteval=%lx nr=%u err=%ld val=%ld\n",
-		       ptep_pa, pteval, nr, ret.error, ret.value);
+		printk(KERN_ERR "[Linux]: nacc_set_ptes_sbi failed: ptep_pa=%lx pteval=%lx nr=%u start_va=%lx root=%lx err=%ld val=%ld\n",
+		       ptep_pa, pteval, nr, start_va, root_pgd_pa,
+		       ret.error, ret.value);
 	}
 }
 

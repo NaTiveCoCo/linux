@@ -568,7 +568,8 @@ static inline void set_pte(pte_t *ptep, pte_t pteval)
 
 void flush_icache_pte(struct mm_struct *mm, pte_t pte);
 
-static inline void __set_pte_at(struct mm_struct *mm, pte_t *ptep, pte_t pteval)
+static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
+				pte_t *ptep, pte_t pteval)
 {
 	if (pte_present(pteval) && pte_exec(pteval))
 		flush_icache_pte(mm, pteval);
@@ -579,7 +580,8 @@ static inline void __set_pte_at(struct mm_struct *mm, pte_t *ptep, pte_t pteval)
 		 * NaCC secure PTP pages are readable in S-mode but must be
 		 * written through M-mode.
 		 */
-		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), 1);
+		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), 1, addr,
+				  __pa(mm->pgd));
 		return;
 	}
 #endif
@@ -595,15 +597,17 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 
 #ifdef CONFIG_RISCV
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
-		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), nr);
+		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), nr, addr,
+				  __pa(mm->pgd));
 		return;
 	}
 #endif
 	for (;;) {
-		__set_pte_at(mm, ptep, pteval);
+		__set_pte_at(mm, addr, ptep, pteval);
 		if (--nr == 0)
 			break;
 		ptep++;
+		addr += PAGE_SIZE;
 		pte_val(pteval) += 1 << _PAGE_PFN_SHIFT;
 	}
 }
@@ -612,7 +616,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 static inline void pte_clear(struct mm_struct *mm,
 	unsigned long addr, pte_t *ptep)
 {
-	__set_pte_at(mm, ptep, __pte(0));
+	__set_pte_at(mm, addr, ptep, __pte(0));
 }
 
 #define __HAVE_ARCH_PTEP_SET_ACCESS_FLAGS	/* defined in mm/pgtable.c */
@@ -804,14 +808,14 @@ static inline void set_pmd_at(struct mm_struct *mm, unsigned long addr,
 				pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(mm, pmdp, pmd);
-	return __set_pte_at(mm, (pte_t *)pmdp, pmd_pte(pmd));
+	return __set_pte_at(mm, addr, (pte_t *)pmdp, pmd_pte(pmd));
 }
 
 static inline void set_pud_at(struct mm_struct *mm, unsigned long addr,
 				pud_t *pudp, pud_t pud)
 {
 	page_table_check_pud_set(mm, pudp, pud);
-	return __set_pte_at(mm, (pte_t *)pudp, pud_pte(pud));
+	return __set_pte_at(mm, addr, (pte_t *)pudp, pud_pte(pud));
 }
 
 #ifdef CONFIG_PAGE_TABLE_CHECK

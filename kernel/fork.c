@@ -761,6 +761,10 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	}
 	/* a new mm has just been created */
 	retval = arch_dup_mmap(oldmm, mm);
+	if (!retval && nacc_region_sync_mm_locked(mm,
+					       NACC_REGION_SYNC_REASON_FORK))
+		printk(KERN_ERR "[Linux]: fork region sync failed for child mm=%px pgd=%px\n",
+		       mm, mm->pgd);
 
 loop_out:
 	vma_iter_free(&vmi);
