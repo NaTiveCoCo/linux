@@ -1,9 +1,10 @@
 #include <linux/mm.h>
 #include <linux/errno.h>
-// #include <linux/kernel.h>
+#include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/fs.h>
 #include <linux/shmem_fs.h>
+#include <linux/string.h>
 #include <asm/nacc.h>
 
 #include <asm/sbi.h>
@@ -13,6 +14,14 @@
 extern unsigned long nacc_mappings_virt;
 
 #define NACC_REGION_PROVENANCE_LOG_LIMIT 16
+
+enum nacc_manifest_mode {
+	NACC_MANIFEST_MODE_OFF = 0,
+	NACC_MANIFEST_MODE_AUDIT = 1,
+	NACC_MANIFEST_MODE_ENFORCE = 2,
+};
+
+static enum nacc_manifest_mode nacc_manifest_mode = NACC_MANIFEST_MODE_OFF;
 
 static const char *nacc_ptp_level_name(unsigned int level)
 {
@@ -52,6 +61,44 @@ static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
 }
 
 DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
+
+static const char *nacc_manifest_mode_name(enum nacc_manifest_mode mode)
+{
+	switch (mode) {
+	case NACC_MANIFEST_MODE_OFF:
+		return "off";
+	case NACC_MANIFEST_MODE_AUDIT:
+		return "audit";
+	case NACC_MANIFEST_MODE_ENFORCE:
+		return "enforce";
+	default:
+		return "invalid";
+	}
+}
+
+static int __init nacc_manifest_mode_setup(char *str)
+{
+	if (!str)
+		return 0;
+
+	if (!strcmp(str, "off"))
+		nacc_manifest_mode = NACC_MANIFEST_MODE_OFF;
+	else if (!strcmp(str, "audit"))
+		nacc_manifest_mode = NACC_MANIFEST_MODE_AUDIT;
+	else if (!strcmp(str, "enforce"))
+		nacc_manifest_mode = NACC_MANIFEST_MODE_ENFORCE;
+	else {
+		printk(KERN_ERR "[Linux]: invalid nacc.manifest_mode=%s, defaulting to off\n",
+		       str);
+		nacc_manifest_mode = NACC_MANIFEST_MODE_OFF;
+		return 1;
+	}
+
+	printk(KERN_ERR "[Linux]: nacc.manifest_mode=%s (PR0 scaffold only; startup sealing unchanged)\n",
+	       nacc_manifest_mode_name(nacc_manifest_mode));
+	return 1;
+}
+__setup("nacc.manifest_mode=", nacc_manifest_mode_setup);
 
 unsigned long nacc_mm_state(struct mm_struct *mm)
 {
@@ -104,6 +151,33 @@ static const char *nacc_region_sync_reason_name(enum nacc_region_sync_reason rea
 	default:
 		return "invalid";
 	}
+}
+
+static bool nacc_region_sync_is_startup_reason(enum nacc_region_sync_reason reason)
+{
+	switch (reason) {
+	case NACC_REGION_SYNC_REASON_INVOKE:
+	case NACC_REGION_SYNC_REASON_EXEC:
+	case NACC_REGION_SYNC_REASON_FORK:
+		return true;
+	default:
+		return false;
+	}
+}
+
+static void nacc_manifest_log_startup_scaffold(struct mm_struct *mm,
+					       unsigned long root_pgd_pa,
+					       unsigned long cid,
+					       enum nacc_region_sync_reason reason,
+					       bool clear_only,
+					       unsigned long emitted)
+{
+	if (!nacc_region_sync_is_startup_reason(reason))
+		return;
+
+	printk(KERN_ERR "[Linux]: manifest scaffold mode=%s mm=%px root=%lx cid=%lx reason=%s clear_only=%d ranges=%lu note=PR0 logging only, no startup policy change\n",
+	       nacc_manifest_mode_name(nacc_manifest_mode), mm, root_pgd_pa, cid,
+	       nacc_region_sync_reason_name(reason), clear_only, emitted);
 }
 
 static const char *nacc_region_class_name(enum nacc_region_class class_id)
@@ -373,6 +447,8 @@ static int nacc_region_sync_mm_emit_locked(struct mm_struct *mm,
 	printk(KERN_ERR "[Linux]: region sync mm=%px root=%lx cid=%lx reason=%s clear_only=%d ranges=%lu\n",
 	       mm, root_pgd_pa, cid, nacc_region_sync_reason_name(reason),
 	       clear_only, emitted);
+	nacc_manifest_log_startup_scaffold(mm, root_pgd_pa, cid, reason,
+					    clear_only, emitted);
 	return 0;
 }
 
