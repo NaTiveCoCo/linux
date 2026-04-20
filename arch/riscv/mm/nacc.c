@@ -2,6 +2,7 @@
 #include <linux/errno.h>
 // #include <linux/kernel.h>
 #include <linux/percpu.h>
+#include <linux/fs.h>
 #include <linux/shmem_fs.h>
 #include <asm/nacc.h>
 
@@ -10,6 +11,8 @@
 #include <asm/pgtable.h>
 
 extern unsigned long nacc_mappings_virt;
+
+#define NACC_REGION_PROVENANCE_LOG_LIMIT 16
 
 static const char *nacc_ptp_level_name(unsigned int level)
 {
@@ -184,6 +187,11 @@ static enum nacc_region_class nacc_classify_vma(struct vm_area_struct *vma,
 	unsigned long flags = 0;
 	bool shmem = false;
 
+	/*
+	 * Phase-1 default-private uses VMA class only as attribution.
+	 * OpenSBI still forces PRIVATE_DATA on every ordinary user leaf.
+	 */
+
 	if (vma->vm_flags & VM_NACC)
 		flags |= NACC_REGION_FLAG_VM_NACC;
 	if (vma->vm_flags & VM_IO)
@@ -236,6 +244,24 @@ excluded:
 	return NACC_REGION_CLASS_SPECIAL_EXCLUDED;
 }
 
+static const char *nacc_region_provenance_name(struct vm_area_struct *vma,
+					       char *buf, size_t buf_len)
+{
+	char *path;
+
+	if (!vma->vm_file) {
+		if (vma_is_anonymous(vma))
+			return "[anon]";
+		return "[no-file]";
+	}
+
+	path = file_path(vma->vm_file, buf, buf_len);
+	if (!IS_ERR(path))
+		return path;
+
+	return vma->vm_file->f_path.dentry->d_name.name;
+}
+
 static int nacc_region_sync_mm_emit_locked(struct mm_struct *mm,
 					   enum nacc_region_sync_reason reason,
 					   bool clear_only)
@@ -248,6 +274,8 @@ static int nacc_region_sync_mm_emit_locked(struct mm_struct *mm,
 	unsigned long prev_start = 0;
 	unsigned long prev_end = 0;
 	unsigned long emitted = 0;
+	unsigned int provenance_logs = 0;
+	bool provenance_truncated = false;
 	enum nacc_region_class prev_class = NACC_REGION_CLASS_INVALID;
 	bool have_prev = false;
 	int ret;
@@ -272,6 +300,31 @@ static int nacc_region_sync_mm_emit_locked(struct mm_struct *mm,
 			unsigned long flags;
 
 			class_id = nacc_classify_vma(vma, &flags);
+			if (!clear_only && vma->vm_file) {
+				char path_buf[256];
+				const char *source;
+
+				if (provenance_logs < NACC_REGION_PROVENANCE_LOG_LIMIT) {
+					source = nacc_region_provenance_name(
+						vma, path_buf, sizeof(path_buf));
+					printk(KERN_ERR "[Linux]: region provenance mm=%px root=%lx range=[%lx,%lx) pgoff=%lx class=%s flags=%lx reason=%s source=%s\n",
+					       mm, root_pgd_pa,
+					       vma->vm_start, vma->vm_end,
+					       ((unsigned long)vma->vm_pgoff)
+						       << PAGE_SHIFT,
+					       nacc_region_class_name(class_id),
+					       flags,
+					       nacc_region_sync_reason_name(reason),
+					       source);
+					provenance_logs++;
+				} else if (!provenance_truncated) {
+					printk(KERN_ERR "[Linux]: region provenance mm=%px root=%lx reason=%s truncated_after=%u\n",
+					       mm, root_pgd_pa,
+					       nacc_region_sync_reason_name(reason),
+					       NACC_REGION_PROVENANCE_LOG_LIMIT);
+					provenance_truncated = true;
+				}
+			}
 			if (have_prev && prev_end == vma->vm_start &&
 			    prev_class == class_id && prev_flags == flags) {
 				prev_end = vma->vm_end;
