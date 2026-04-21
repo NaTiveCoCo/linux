@@ -54,6 +54,15 @@ enum nacc_region_flag {
 	NACC_REGION_FLAG_AMBIGUOUS = (1U << 8),
 };
 
+enum nacc_startup_object_role {
+	NACC_STARTUP_OBJECT_INVALID = 0,
+	NACC_STARTUP_OBJECT_ENTRY = 1,
+	NACC_STARTUP_OBJECT_INTERP = 2,
+};
+
+#define NACC_STARTUP_COORD_ENTRY_VALID	(1UL << 0)
+#define NACC_STARTUP_COORD_INTERP_VALID	(1UL << 1)
+
 /* 
  * The agent has already been initialized, and the new child process is forked.
  * This flag is set in the child process.
@@ -123,6 +132,14 @@ void nacc_invoke_child(void);
 void nacc_attach_forked_child_if_needed(void);
 void nacc_register_forked_child_pid(unsigned long child_pid);
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
+void nacc_cache_startup_elf_coords(struct mm_struct *mm,
+				   unsigned long entry_load_bias,
+				   unsigned long interp_load_addr,
+				   unsigned long at_entry,
+				   unsigned long at_phdr,
+				   bool interp_present);
+void nacc_report_startup_elf_coords(struct mm_struct *mm, unsigned long cid,
+				    const char *tag);
 
 void pgtbl_debug(unsigned long pgd);
 bool nacc_mm_needs_region_sync(struct mm_struct *mm);

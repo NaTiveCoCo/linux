@@ -49,6 +49,9 @@
 #include <linux/rseq.h>
 #include <asm/param.h>
 #include <asm/page.h>
+#ifdef CONFIG_RISCV
+#include <asm/nacc.h>
+#endif
 
 #ifndef ELF_COMPAT
 #define ELF_COMPAT 0
@@ -829,6 +832,7 @@ static int load_elf_binary(struct linux_binprm *bprm)
 	unsigned long elf_entry;
 	unsigned long e_entry;
 	unsigned long interp_load_addr = 0;
+	bool interp_present = false;
 	unsigned long start_code, end_code, start_data, end_data;
 	unsigned long reloc_func_desc __maybe_unused = 0;
 	int executable_stack = EXSTACK_DEFAULT;
@@ -1232,6 +1236,7 @@ out_free_interp:
 	current->mm->start_brk = current->mm->brk = ELF_PAGEALIGN(elf_brk);
 
 	if (interpreter) {
+		interp_present = true;
 		elf_entry = load_elf_interp(interp_elf_ex,
 					    interpreter,
 					    load_bias, interp_elf_phdata,
@@ -1277,6 +1282,11 @@ out_free_interp:
 				   e_entry, phdr_addr);
 	if (retval < 0)
 		goto out;
+
+#ifdef CONFIG_RISCV
+	nacc_cache_startup_elf_coords(current->mm, load_bias, interp_load_addr,
+				      e_entry, phdr_addr, interp_present);
+#endif
 
 	mm = current->mm;
 	mm->end_code = end_code;

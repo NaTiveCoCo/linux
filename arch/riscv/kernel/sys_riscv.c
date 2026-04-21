@@ -221,6 +221,8 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_INVOKE))
         printk(KERN_ERR "[Linux]: %s region sync failed for mm=%px\n",
                tag, current->mm);
+    nacc_report_startup_elf_coords(current->mm, current->thread.nacc_cid,
+                                   tag);
 
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
@@ -339,6 +341,8 @@ void nacc_exec(void)
     if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
         printk(KERN_ERR "[Linux]: nacc_exec region sync failed for mm=%px\n",
                current->mm);
+    nacc_report_startup_elf_coords(current->mm, current->thread.nacc_cid,
+                                   "nacc_exec");
     current->thread.nacc_flag = NACC_INITED;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REEXEC, virt_agent, pid,
@@ -381,6 +385,8 @@ void nacc_invoke_child(void)
     if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
         printk(KERN_ERR "[Linux]: nacc_invoke_child region sync failed for mm=%px\n",
                current->mm);
+    nacc_report_startup_elf_coords(current->mm, cid,
+                                   "nacc_invoke_child");
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
               cid, 0, 0, 0);
 

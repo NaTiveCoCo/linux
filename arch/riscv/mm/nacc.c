@@ -196,6 +196,123 @@ static const char *nacc_region_class_name(enum nacc_region_class class_id)
 	}
 }
 
+static const char *nacc_startup_object_role_name(enum nacc_startup_object_role role)
+{
+	switch (role) {
+	case NACC_STARTUP_OBJECT_ENTRY:
+		return "entry";
+	case NACC_STARTUP_OBJECT_INTERP:
+		return "interp";
+	default:
+		return "invalid";
+	}
+}
+
+static int nacc_startup_coord_sbi(unsigned long root_pgd_pa,
+				  unsigned long cid,
+				  enum nacc_startup_object_role role,
+				  unsigned long runtime_base)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_STARTUP_COORD,
+			root_pgd_pa, cid, role, runtime_base, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: startup coord report failed: root=%lx cid=%lx role=%s runtime_base=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, cid, nacc_startup_object_role_name(role),
+		       runtime_base, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+void nacc_cache_startup_elf_coords(struct mm_struct *mm,
+				   unsigned long entry_load_bias,
+				   unsigned long interp_load_addr,
+				   unsigned long at_entry,
+				   unsigned long at_phdr,
+				   bool interp_present)
+{
+	unsigned long flags = NACC_STARTUP_COORD_ENTRY_VALID;
+
+	if (!mm || !nacc_mm_is_active(mm))
+		return;
+
+	if (interp_present)
+		flags |= NACC_STARTUP_COORD_INTERP_VALID;
+
+	WRITE_ONCE(mm->context.nacc_startup_entry_load_bias, entry_load_bias);
+	WRITE_ONCE(mm->context.nacc_startup_interp_load_addr,
+		   interp_load_addr);
+	WRITE_ONCE(mm->context.nacc_startup_at_entry, at_entry);
+	WRITE_ONCE(mm->context.nacc_startup_at_phdr, at_phdr);
+	WRITE_ONCE(mm->context.nacc_startup_flags, flags);
+
+	printk(KERN_ERR "[Linux]: manifest startup coords cached mm=%px entry_load_bias=%lx interp_load_addr=%lx at_entry=%lx at_phdr=%lx interp_present=%d note=PR3 coordinates only, no startup policy change\n",
+	       mm, entry_load_bias, interp_load_addr, at_entry, at_phdr,
+	       interp_present ? 1 : 0);
+}
+EXPORT_SYMBOL(nacc_cache_startup_elf_coords);
+
+void nacc_report_startup_elf_coords(struct mm_struct *mm, unsigned long cid,
+				    const char *tag)
+{
+	unsigned long flags;
+	unsigned long root_pgd_pa;
+	unsigned long entry_load_bias;
+	unsigned long interp_load_addr;
+	unsigned long at_entry;
+	unsigned long at_phdr;
+	int ret;
+
+	if (!mm || !mm->pgd)
+		return;
+
+	if (!nacc_mm_needs_region_sync(mm))
+		return;
+
+	if (!cid) {
+		printk(KERN_ERR "[Linux]: manifest startup coords skipped without cid: mm=%px tag=%s state=%lx\n",
+		       mm, tag, nacc_mm_state(mm));
+		return;
+	}
+
+	flags = READ_ONCE(mm->context.nacc_startup_flags);
+	if (!(flags & NACC_STARTUP_COORD_ENTRY_VALID)) {
+		printk(KERN_ERR "[Linux]: manifest startup coords missing mm=%px tag=%s cid=%lx note=PR3 report skipped, startup behavior unchanged\n",
+		       mm, tag, cid);
+		return;
+	}
+
+	root_pgd_pa = virt_to_phys(mm->pgd);
+	entry_load_bias = READ_ONCE(mm->context.nacc_startup_entry_load_bias);
+	interp_load_addr = READ_ONCE(mm->context.nacc_startup_interp_load_addr);
+	at_entry = READ_ONCE(mm->context.nacc_startup_at_entry);
+	at_phdr = READ_ONCE(mm->context.nacc_startup_at_phdr);
+
+	printk(KERN_ERR "[Linux]: manifest startup report mm=%px root=%lx cid=%lx tag=%s entry_load_bias=%lx interp_load_addr=%lx at_entry=%lx at_phdr=%lx interp_present=%d note=PR3 coordinates only, no startup policy change\n",
+	       mm, root_pgd_pa, cid, tag, entry_load_bias, interp_load_addr,
+	       at_entry, at_phdr,
+	       (flags & NACC_STARTUP_COORD_INTERP_VALID) ? 1 : 0);
+
+	ret = nacc_startup_coord_sbi(root_pgd_pa, cid, NACC_STARTUP_OBJECT_ENTRY,
+				     entry_load_bias);
+	if (ret)
+		printk(KERN_ERR "[Linux]: manifest startup entry coord report failed for mm=%px tag=%s\n",
+		       mm, tag);
+
+	if (flags & NACC_STARTUP_COORD_INTERP_VALID) {
+		ret = nacc_startup_coord_sbi(root_pgd_pa, cid,
+					     NACC_STARTUP_OBJECT_INTERP,
+					     interp_load_addr);
+		if (ret)
+			printk(KERN_ERR "[Linux]: manifest startup interp coord report failed for mm=%px tag=%s\n",
+			       mm, tag);
+	}
+}
+EXPORT_SYMBOL(nacc_report_startup_elf_coords);
+
 static int nacc_region_sync_begin_sbi(unsigned long root_pgd_pa,
 				      unsigned long cid,
 				      enum nacc_region_sync_reason reason)

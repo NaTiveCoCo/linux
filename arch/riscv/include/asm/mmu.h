@@ -17,6 +17,11 @@ typedef struct {
 #endif
 	void *vdso;
 	unsigned long nacc_state;
+	unsigned long nacc_startup_flags;
+	unsigned long nacc_startup_entry_load_bias;
+	unsigned long nacc_startup_interp_load_addr;
+	unsigned long nacc_startup_at_entry;
+	unsigned long nacc_startup_at_phdr;
 #ifdef CONFIG_SMP
 	/* A local icache flush is needed before user execution can resume. */
 	cpumask_t icache_stale_mask;
