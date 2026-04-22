@@ -3,8 +3,10 @@
 #include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/fs.h>
+#include <linux/slab.h>
 #include <linux/shmem_fs.h>
 #include <linux/string.h>
+#include <linux/unaligned.h>
 #include <asm/nacc.h>
 
 #include <asm/sbi.h>
@@ -22,6 +24,32 @@ enum nacc_manifest_mode {
 };
 
 static enum nacc_manifest_mode nacc_manifest_mode = NACC_MANIFEST_MODE_OFF;
+
+#define NACC_STARTUP_TABLE_PATH "/etc/nacc/startup_table.bin"
+#define NACC_STARTUP_TABLE_MAGIC "NSTRTBL1"
+#define NACC_STARTUP_TABLE_VERSION 1U
+#define NACC_STARTUP_TABLE_MAX_SIZE PAGE_SIZE
+
+struct nacc_startup_table_header_disk {
+	u8 magic[8];
+	__le32 version;
+	__le32 record_count;
+} __packed;
+
+struct nacc_startup_table_record_disk {
+	__le32 role;
+	__le32 phdr_index;
+	__le64 page_offset;
+	__le64 page_size;
+	__le32 flags_raw;
+	__le32 reserved;
+} __packed;
+
+struct nacc_startup_table_data {
+	void *data;
+	const struct nacc_startup_table_record_disk *records;
+	u32 record_count;
+};
 
 static const char *nacc_ptp_level_name(unsigned int level)
 {
@@ -76,6 +104,16 @@ static const char *nacc_manifest_mode_name(enum nacc_manifest_mode mode)
 	}
 }
 
+static bool nacc_manifest_audit_enabled(void)
+{
+	return nacc_manifest_mode != NACC_MANIFEST_MODE_OFF;
+}
+
+static bool nacc_manifest_enforce_requested(void)
+{
+	return nacc_manifest_mode == NACC_MANIFEST_MODE_ENFORCE;
+}
+
 static int __init nacc_manifest_mode_setup(char *str)
 {
 	if (!str)
@@ -94,8 +132,10 @@ static int __init nacc_manifest_mode_setup(char *str)
 		return 1;
 	}
 
-	printk(KERN_ERR "[Linux]: nacc.manifest_mode=%s (PR0 scaffold only; startup sealing unchanged)\n",
-	       nacc_manifest_mode_name(nacc_manifest_mode));
+	printk(KERN_ERR "[Linux]: nacc.manifest_mode=%s (startup audit only; startup sealing unchanged%s)\n",
+	       nacc_manifest_mode_name(nacc_manifest_mode),
+	       nacc_manifest_enforce_requested() ?
+	       ", enforce requested but no enforcement yet" : "");
 	return 1;
 }
 __setup("nacc.manifest_mode=", nacc_manifest_mode_setup);
@@ -175,7 +215,7 @@ static void nacc_manifest_log_startup_scaffold(struct mm_struct *mm,
 	if (!nacc_region_sync_is_startup_reason(reason))
 		return;
 
-	printk(KERN_ERR "[Linux]: manifest scaffold mode=%s mm=%px root=%lx cid=%lx reason=%s clear_only=%d ranges=%lu note=PR0 logging only, no startup policy change\n",
+	printk(KERN_ERR "[Linux]: manifest scaffold mode=%s mm=%px root=%lx cid=%lx reason=%s clear_only=%d ranges=%lu note=startup region logging only, startup sealing unchanged\n",
 	       nacc_manifest_mode_name(nacc_manifest_mode), mm, root_pgd_pa, cid,
 	       nacc_region_sync_reason_name(reason), clear_only, emitted);
 }
@@ -225,6 +265,192 @@ static int nacc_startup_coord_sbi(unsigned long root_pgd_pa,
 	}
 
 	return 0;
+}
+
+static int nacc_startup_audit_range_sbi(unsigned long root_pgd_pa,
+					unsigned long cid,
+					enum nacc_startup_object_role role,
+					unsigned long page_offset,
+					unsigned long page_size,
+					unsigned long phdr_index)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_STARTUP_AUDIT_RANGE,
+			root_pgd_pa, cid, role, page_offset, page_size,
+			phdr_index);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: startup audit report failed: root=%lx cid=%lx role=%s phdr=%lx page_offset=%lx page_size=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, cid, nacc_startup_object_role_name(role),
+		       phdr_index, page_offset, page_size, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static void nacc_free_startup_table(struct nacc_startup_table_data *table)
+{
+	kfree(table->data);
+	table->data = NULL;
+	table->records = NULL;
+	table->record_count = 0;
+}
+
+static int nacc_load_startup_table(struct nacc_startup_table_data *table)
+{
+	struct file *file;
+	struct nacc_startup_table_header_disk *header;
+	void *data = NULL;
+	loff_t size;
+	loff_t pos = 0;
+	ssize_t nread;
+	size_t expected_size;
+	u32 record_count;
+	int ret = 0;
+
+	memset(table, 0, sizeof(*table));
+
+	file = filp_open(NACC_STARTUP_TABLE_PATH, O_RDONLY, 0);
+	if (IS_ERR(file))
+		return PTR_ERR(file);
+
+	size = i_size_read(file_inode(file));
+	if (size < sizeof(*header) || size > NACC_STARTUP_TABLE_MAX_SIZE) {
+		ret = -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit invalid table size path=%s size=%lld max=%lu\n",
+		       NACC_STARTUP_TABLE_PATH, (long long)size,
+		       (unsigned long)NACC_STARTUP_TABLE_MAX_SIZE);
+		goto out_close;
+	}
+
+	data = kmalloc(size, GFP_KERNEL);
+	if (!data) {
+		ret = -ENOMEM;
+		goto out_close;
+	}
+
+	nread = kernel_read(file, data, size, &pos);
+	if (nread != size) {
+		ret = nread < 0 ? (int)nread : -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit short read path=%s want=%lld got=%zd err=%d\n",
+		       NACC_STARTUP_TABLE_PATH, (long long)size, nread, ret);
+		goto out_free;
+	}
+
+	header = data;
+	if (memcmp(header->magic, NACC_STARTUP_TABLE_MAGIC,
+		   sizeof(header->magic)) != 0) {
+		ret = -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit bad table magic path=%s\n",
+		       NACC_STARTUP_TABLE_PATH);
+		goto out_free;
+	}
+
+	if (get_unaligned_le32(&header->version) != NACC_STARTUP_TABLE_VERSION) {
+		ret = -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit unsupported table version path=%s version=%u expected=%u\n",
+		       NACC_STARTUP_TABLE_PATH,
+		       get_unaligned_le32(&header->version),
+		       NACC_STARTUP_TABLE_VERSION);
+		goto out_free;
+	}
+
+	record_count = get_unaligned_le32(&header->record_count);
+	if (record_count >
+	    (size - sizeof(*header)) /
+	    sizeof(struct nacc_startup_table_record_disk)) {
+		ret = -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit invalid table count path=%s count=%u size=%lld\n",
+		       NACC_STARTUP_TABLE_PATH, record_count, (long long)size);
+		goto out_free;
+	}
+
+	expected_size = sizeof(*header) +
+		record_count * sizeof(struct nacc_startup_table_record_disk);
+	if (expected_size != size) {
+		ret = -EINVAL;
+		printk(KERN_ERR "[Linux]: manifest startup audit unexpected table payload path=%s expected=%zu size=%lld\n",
+		       NACC_STARTUP_TABLE_PATH, expected_size, (long long)size);
+		goto out_free;
+	}
+
+	table->data = data;
+	table->records = (const struct nacc_startup_table_record_disk *)
+		((u8 *)data + sizeof(*header));
+	table->record_count = record_count;
+
+	goto out_close;
+
+out_free:
+	kfree(data);
+out_close:
+	filp_close(file, NULL);
+	return ret;
+}
+
+static void nacc_emit_startup_audit(struct mm_struct *mm,
+				    unsigned long root_pgd_pa,
+				    unsigned long cid,
+				    const char *tag)
+{
+	struct nacc_startup_table_data table;
+	bool enforce_requested;
+	u32 index;
+	int ret;
+
+	if (!nacc_manifest_audit_enabled())
+		return;
+
+	enforce_requested = nacc_manifest_enforce_requested();
+	ret = nacc_load_startup_table(&table);
+	if (ret) {
+		printk(KERN_ERR "[Linux]: manifest startup audit skipped mode=%s mm=%px root=%lx cid=%lx tag=%s path=%s err=%d note=startup behavior unchanged%s\n",
+		       nacc_manifest_mode_name(nacc_manifest_mode), mm,
+		       root_pgd_pa, cid, tag, NACC_STARTUP_TABLE_PATH, ret,
+		       enforce_requested ?
+		       ", enforce requested but no enforcement yet" : "");
+		return;
+	}
+
+	printk(KERN_ERR "[Linux]: manifest startup audit table mode=%s effective=audit mm=%px root=%lx cid=%lx tag=%s path=%s records=%u note=PR4 startup audit only%s\n",
+	       nacc_manifest_mode_name(nacc_manifest_mode), mm, root_pgd_pa, cid,
+	       tag, NACC_STARTUP_TABLE_PATH, table.record_count,
+	       enforce_requested ?
+	       ", enforce requested but no enforcement yet" : "");
+
+	for (index = 0; index < table.record_count; index++) {
+		const struct nacc_startup_table_record_disk *record =
+			&table.records[index];
+		unsigned long role = get_unaligned_le32(&record->role);
+		unsigned long phdr_index =
+			get_unaligned_le32(&record->phdr_index);
+		unsigned long page_offset =
+			get_unaligned_le64(&record->page_offset);
+		unsigned long page_size =
+			get_unaligned_le64(&record->page_size);
+		unsigned long flags_raw =
+			get_unaligned_le32(&record->flags_raw);
+
+		printk(KERN_ERR "[Linux]: manifest startup audit dispatch mode=%s mm=%px root=%lx cid=%lx tag=%s record=%u role=%s phdr=%lx page_offset=%lx page_size=%lx flags_raw=%lx effective=audit note=PR4 startup audit only%s\n",
+		       nacc_manifest_mode_name(nacc_manifest_mode), mm,
+		       root_pgd_pa, cid, tag, index,
+		       nacc_startup_object_role_name(role), phdr_index,
+		       page_offset, page_size, flags_raw,
+		       enforce_requested ?
+		       ", enforce requested but no enforcement yet" : "");
+
+		ret = nacc_startup_audit_range_sbi(root_pgd_pa, cid, role,
+						   page_offset, page_size,
+						   phdr_index);
+		if (ret)
+			printk(KERN_ERR "[Linux]: manifest startup audit dispatch failed mm=%px tag=%s record=%u role=%s phdr=%lx\n",
+			       mm, tag, index,
+			       nacc_startup_object_role_name(role),
+			       phdr_index);
+	}
+
+	nacc_free_startup_table(&table);
 }
 
 void nacc_cache_startup_elf_coords(struct mm_struct *mm,
@@ -310,6 +536,8 @@ void nacc_report_startup_elf_coords(struct mm_struct *mm, unsigned long cid,
 			printk(KERN_ERR "[Linux]: manifest startup interp coord report failed for mm=%px tag=%s\n",
 			       mm, tag);
 	}
+
+	nacc_emit_startup_audit(mm, root_pgd_pa, cid, tag);
 }
 EXPORT_SYMBOL(nacc_report_startup_elf_coords);
 
