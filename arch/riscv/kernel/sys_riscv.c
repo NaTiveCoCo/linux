@@ -222,6 +222,13 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
         printk(KERN_ERR "[Linux]: %s region sync failed for mm=%px\n",
                tag, current->mm);
 
+    /*
+     * RISC-V ELF startup treats entry a0 as rtld_fini. At this point the
+     * execve syscall frame still carries the pre-dispatch -ENOSYS sentinel;
+     * clear it before the direct agent-to-user entry.
+     */
+    regs->a0 = 0;
+
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
     sbi_ecall(SBI_EXT_NACC, sbi_fid, virt_agent, pid, (unsigned long) regs,
@@ -340,6 +347,8 @@ void nacc_exec(void)
         printk(KERN_ERR "[Linux]: nacc_exec region sync failed for mm=%px\n",
                current->mm);
     current->thread.nacc_flag = NACC_INITED;
+    /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
+    regs->a0 = 0;
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REEXEC, virt_agent, pid,
                     (unsigned long) regs, 0, 0, 0);
@@ -365,6 +374,7 @@ void nacc_invoke_child(void)
     unsigned long pid = current->pid;
     unsigned long virt_agent = 0;
     unsigned long cid = current->thread.nacc_cid;
+    struct pt_regs *regs = task_pt_regs(current);
 
     printk(KERN_ERR "[Linux]: NaCC re-attach process, pid=%lu, cid=%lx\n", pid, cid);
 
@@ -381,6 +391,8 @@ void nacc_invoke_child(void)
     if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
         printk(KERN_ERR "[Linux]: nacc_invoke_child region sync failed for mm=%px\n",
                current->mm);
+    /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
+    regs->a0 = 0;
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
               cid, 0, 0, 0);
 
