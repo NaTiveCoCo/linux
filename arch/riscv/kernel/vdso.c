@@ -13,6 +13,7 @@
 #include <linux/err.h>
 #include <asm/page.h>
 #include <asm/vdso.h>
+#include <asm/nacc.h>
 #include <linux/time_namespace.h>
 #include <vdso/datapage.h>
 #include <vdso/vsyscall.h>
@@ -48,6 +49,18 @@ static struct __vdso_info vdso_info;
 #ifdef CONFIG_COMPAT
 static struct __vdso_info compat_vdso_info;
 #endif
+
+bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma)
+{
+	if (vma_is_special_mapping(vma, vdso_info.dm))
+		return true;
+#ifdef CONFIG_COMPAT
+	if (vma_is_special_mapping(vma, compat_vdso_info.dm))
+		return true;
+#endif
+
+	return false;
+}
 
 static int vdso_mremap(const struct vm_special_mapping *sm,
 		       struct vm_area_struct *new_vma)

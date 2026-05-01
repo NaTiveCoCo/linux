@@ -210,6 +210,8 @@ static enum nacc_region_class nacc_classify_vma(struct vm_area_struct *vma,
 		if (shmem)
 			flags |= NACC_REGION_FLAG_SHMEM;
 	}
+	if (nacc_vma_is_vvar_abi_data(vma))
+		flags |= NACC_REGION_FLAG_VVAR_ABI_DATA;
 
 	if (vma->vm_flags & (VM_NACC | VM_IO | VM_PFNMAP | VM_MIXEDMAP))
 		goto excluded;

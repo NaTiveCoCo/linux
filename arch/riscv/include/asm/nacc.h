@@ -8,6 +8,7 @@
 
 struct mm_struct;
 struct ptdesc;
+struct vm_area_struct;
 
 struct nacc_reclaim_list {
 	unsigned long pfns[NACC_RECLAIM_LIST_SIZE];
@@ -52,6 +53,7 @@ enum nacc_region_flag {
 	NACC_REGION_FLAG_FILE = (1U << 6),
 	NACC_REGION_FLAG_SHMEM = (1U << 7),
 	NACC_REGION_FLAG_AMBIGUOUS = (1U << 8),
+	NACC_REGION_FLAG_VVAR_ABI_DATA = (1U << 9),
 };
 
 /* 
@@ -126,6 +128,15 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 
 void pgtbl_debug(unsigned long pgd);
 bool nacc_mm_needs_region_sync(struct mm_struct *mm);
+#ifdef CONFIG_MMU
+bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma);
+#else
+static inline bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma)
+{
+	(void)vma;
+	return false;
+}
+#endif
 int nacc_region_sync_mm(struct mm_struct *mm,
 			enum nacc_region_sync_reason reason);
 int nacc_region_sync_mm_locked(struct mm_struct *mm,
