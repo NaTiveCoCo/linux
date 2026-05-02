@@ -56,6 +56,18 @@ enum nacc_region_flag {
 	NACC_REGION_FLAG_VVAR_ABI_DATA = (1U << 9),
 };
 
+enum nacc_private_data_path_category {
+	NACC_PD_PATH_UNKNOWN = 0,
+	NACC_PD_PATH_USER_BUFFER_READ = 1,
+	NACC_PD_PATH_USER_BUFFER_WRITE = 2,
+	NACC_PD_PATH_FILE_PATH = 3,
+	NACC_PD_PATH_PIPE = 4,
+	NACC_PD_PATH_FORK_EXEC = 5,
+	NACC_PD_PATH_MAPPING_UPDATE = 6,
+	NACC_PD_PATH_EXIT_TEARDOWN = 7,
+	NACC_PD_PATH_SHARED_MEMORY = 8,
+};
+
 /* 
  * The agent has already been initialized, and the new child process is forked.
  * This flag is set in the child process.
@@ -156,6 +168,11 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
+void nacc_private_data_syscall_enter(unsigned long syscall_nr,
+				     unsigned long path_category,
+				     const char *syscall_name);
+void nacc_private_data_syscall_exit(unsigned long syscall_nr,
+				    unsigned long path_category);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

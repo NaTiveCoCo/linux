@@ -122,6 +122,82 @@ static const char *nacc_region_class_name(enum nacc_region_class class_id)
 	}
 }
 
+static const char *nacc_private_data_path_category_name(unsigned long category)
+{
+	switch (category) {
+	case NACC_PD_PATH_USER_BUFFER_READ:
+		return "user_buffer_read";
+	case NACC_PD_PATH_USER_BUFFER_WRITE:
+		return "user_buffer_write";
+	case NACC_PD_PATH_FILE_PATH:
+		return "file_path";
+	case NACC_PD_PATH_PIPE:
+		return "pipe";
+	case NACC_PD_PATH_FORK_EXEC:
+		return "fork_exec";
+	case NACC_PD_PATH_MAPPING_UPDATE:
+		return "mapping_update";
+	case NACC_PD_PATH_EXIT_TEARDOWN:
+		return "exit_teardown";
+	case NACC_PD_PATH_SHARED_MEMORY:
+		return "shared_memory";
+	case NACC_PD_PATH_UNKNOWN:
+	default:
+		return "unknown";
+	}
+}
+
+static void nacc_private_data_syscall_context_sbi(unsigned long syscall_nr,
+						  unsigned long path_category,
+						  bool active,
+						  const char *syscall_name)
+{
+	unsigned long root_pgd_pa;
+	struct sbiret ret;
+
+	if (!current->mm || !current->mm->pgd)
+		return;
+	if (!current->thread.nacc_cid)
+		return;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return;
+
+	root_pgd_pa = virt_to_phys(current->mm->pgd);
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_PRIVATE_DATA_CONTEXT,
+			current->pid, (unsigned long)current, root_pgd_pa,
+			syscall_nr, path_category, active ? 1UL : 0UL);
+	if (ret.error) {
+		printk_ratelimited(KERN_ERR "[Linux]: PRIVATE_DATA syscall context update failed pid=%d syscall=%lu path=%s active=%d err=%ld val=%ld\n",
+				   current->pid, syscall_nr,
+				   nacc_private_data_path_category_name(path_category),
+				   active ? 1 : 0, ret.error, ret.value);
+		return;
+	}
+
+	if (active) {
+		printk(KERN_ERR "[Linux]: PRIVATE_DATA syscall context enter pid=%d comm=%s cid=%lx task=%px root=%lx syscall=%lu name=%s path=%s\n",
+		       current->pid, current->comm, current->thread.nacc_cid,
+		       current, root_pgd_pa, syscall_nr,
+		       syscall_name ? syscall_name : "unknown",
+		       nacc_private_data_path_category_name(path_category));
+	}
+}
+
+void nacc_private_data_syscall_enter(unsigned long syscall_nr,
+				     unsigned long path_category,
+				     const char *syscall_name)
+{
+	nacc_private_data_syscall_context_sbi(syscall_nr, path_category, true,
+					      syscall_name);
+}
+
+void nacc_private_data_syscall_exit(unsigned long syscall_nr,
+				    unsigned long path_category)
+{
+	nacc_private_data_syscall_context_sbi(syscall_nr, path_category, false,
+					      NULL);
+}
+
 static int nacc_region_sync_begin_sbi(unsigned long root_pgd_pa,
 				      unsigned long cid,
 				      enum nacc_region_sync_reason reason)
@@ -457,10 +533,14 @@ void flush_reclaim_list(void)
 
 void pgtbl_debug(unsigned long pgd)
 {
-    printk(KERN_ERR "[Linux]: calling pgtbl_debug SBI call\n");
-    sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_DEBUG,
-              pgd, 0,
-              0, 0, 0, 0);
+    struct sbiret ret;
+
+    printk(KERN_ERR "[Linux]: calling pgtbl_debug SBI call pgd=%lx\n", pgd);
+    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_DEBUG,
+                    pgd, 0,
+                    0, 0, 0, 0);
+    printk(KERN_ERR "[Linux]: pgtbl_debug SBI returned error=%ld value=%ld\n",
+           ret.error, ret.value);
 }
 
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
