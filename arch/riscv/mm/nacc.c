@@ -242,12 +242,14 @@ void nacc_private_data_uaccess_enter(unsigned long direction,
 	nacc_private_data_uaccess_context_sbi(direction, caller_pc, user_va,
 					      bytes, true);
 }
+EXPORT_SYMBOL(nacc_private_data_uaccess_enter);
 
 void nacc_private_data_uaccess_exit(void)
 {
 	nacc_private_data_uaccess_context_sbi(NACC_PD_UACCESS_UNKNOWN, 0, 0, 0,
 					      false);
 }
+EXPORT_SYMBOL(nacc_private_data_uaccess_exit);
 
 static int nacc_region_sync_begin_sbi(unsigned long root_pgd_pa,
 				      unsigned long cid,
