@@ -68,6 +68,12 @@ enum nacc_private_data_path_category {
 	NACC_PD_PATH_SHARED_MEMORY = 8,
 };
 
+enum nacc_private_data_uaccess_direction {
+	NACC_PD_UACCESS_UNKNOWN = 0,
+	NACC_PD_UACCESS_FROM_USER = 1,
+	NACC_PD_UACCESS_TO_USER = 2,
+};
+
 /* 
  * The agent has already been initialized, and the new child process is forked.
  * This flag is set in the child process.
@@ -173,6 +179,11 @@ void nacc_private_data_syscall_enter(unsigned long syscall_nr,
 				     const char *syscall_name);
 void nacc_private_data_syscall_exit(unsigned long syscall_nr,
 				    unsigned long path_category);
+void nacc_private_data_uaccess_enter(unsigned long direction,
+				     unsigned long caller_pc,
+				     unsigned long user_va,
+				     unsigned long bytes);
+void nacc_private_data_uaccess_exit(void);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */

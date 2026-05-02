@@ -17,10 +17,12 @@
 #ifdef CONFIG_MMU
 #include <linux/errno.h>
 #include <linux/compiler.h>
+#include <linux/instruction_pointer.h>
 #include <linux/thread_info.h>
 #include <asm/byteorder.h>
 #include <asm/extable.h>
 #include <asm/asm.h>
+#include <asm/nacc.h>
 #include <asm-generic/access_ok.h>
 
 #define __enable_user_access()							\
@@ -293,13 +295,25 @@ unsigned long __must_check __asm_copy_from_user(void *to,
 static inline unsigned long
 raw_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
-	return __asm_copy_from_user(to, from, n);
+	unsigned long ret;
+
+	nacc_private_data_uaccess_enter(NACC_PD_UACCESS_FROM_USER, _RET_IP_,
+					(unsigned long)from, n);
+	ret = __asm_copy_from_user(to, from, n);
+	nacc_private_data_uaccess_exit();
+	return ret;
 }
 
 static inline unsigned long
 raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
-	return __asm_copy_to_user(to, from, n);
+	unsigned long ret;
+
+	nacc_private_data_uaccess_enter(NACC_PD_UACCESS_TO_USER, _RET_IP_,
+					(unsigned long)to, n);
+	ret = __asm_copy_to_user(to, from, n);
+	nacc_private_data_uaccess_exit();
+	return ret;
 }
 
 extern long strncpy_from_user(char *dest, const char __user *src, long count);

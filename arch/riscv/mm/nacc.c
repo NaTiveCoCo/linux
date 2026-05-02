@@ -198,6 +198,57 @@ void nacc_private_data_syscall_exit(unsigned long syscall_nr,
 					      NULL);
 }
 
+static void nacc_private_data_uaccess_context_sbi(unsigned long direction,
+						  unsigned long caller_pc,
+						  unsigned long user_va,
+						  unsigned long bytes,
+						  bool active)
+{
+	unsigned long root_pgd_pa;
+	struct sbiret ret;
+
+	if (!current->mm || !current->mm->pgd)
+		return;
+	if (!current->thread.nacc_cid)
+		return;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return;
+
+	root_pgd_pa = virt_to_phys(current->mm->pgd);
+	ret = sbi_ecall(SBI_EXT_NACC,
+			SBI_EXT_NACC_PRIVATE_DATA_UACCESS_CONTEXT,
+			current->pid, (unsigned long)current, root_pgd_pa,
+			direction, caller_pc, active ? bytes : 0UL);
+	if (ret.error) {
+		printk_ratelimited(KERN_ERR "[Linux]: PRIVATE_DATA uaccess context update failed pid=%d direction=%lu active=%d err=%ld val=%ld\n",
+				   current->pid, direction, active ? 1 : 0,
+				   ret.error, ret.value);
+		return;
+	}
+
+	if (active) {
+		printk_ratelimited(KERN_ERR "[Linux]: PRIVATE_DATA uaccess context enter pid=%d comm=%s cid=%lx direction=%lu caller=%lx user_va=%lx bytes=%lu\n",
+				   current->pid, current->comm,
+				   current->thread.nacc_cid, direction,
+				   caller_pc, user_va, bytes);
+	}
+}
+
+void nacc_private_data_uaccess_enter(unsigned long direction,
+				     unsigned long caller_pc,
+				     unsigned long user_va,
+				     unsigned long bytes)
+{
+	nacc_private_data_uaccess_context_sbi(direction, caller_pc, user_va,
+					      bytes, true);
+}
+
+void nacc_private_data_uaccess_exit(void)
+{
+	nacc_private_data_uaccess_context_sbi(NACC_PD_UACCESS_UNKNOWN, 0, 0, 0,
+					      false);
+}
+
 static int nacc_region_sync_begin_sbi(unsigned long root_pgd_pa,
 				      unsigned long cid,
 				      enum nacc_region_sync_reason reason)
