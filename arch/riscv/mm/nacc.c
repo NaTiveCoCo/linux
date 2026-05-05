@@ -1,9 +1,12 @@
 #include <linux/mm.h>
 #include <linux/errno.h>
 // #include <linux/kernel.h>
+#include <linux/atomic.h>
+#include <linux/init.h>
 #include <linux/percpu.h>
 #include <linux/fs.h>
 #include <linux/shmem_fs.h>
+#include <linux/string.h>
 #include <asm/nacc.h>
 
 #include <asm/sbi.h>
@@ -13,6 +16,11 @@
 extern unsigned long nacc_mappings_virt;
 
 #define NACC_REGION_PROVENANCE_LOG_LIMIT 16
+
+enum nacc_uaccess_tx_report_mode {
+	NACC_UACCESS_TX_REPORT_ALL = 0,
+	NACC_UACCESS_TX_REPORT_BULK = 1,
+};
 
 static const char *nacc_ptp_level_name(unsigned int level)
 {
@@ -52,6 +60,29 @@ static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
 }
 
 DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
+static atomic64_t nacc_uaccess_tx_next_id = ATOMIC64_INIT(0);
+static int nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_ALL;
+
+static int __init nacc_uaccess_tx_report_setup(char *str)
+{
+	if (!str)
+		return 0;
+
+	if (sysfs_streq(str, "all")) {
+		nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_ALL;
+		return 1;
+	}
+
+	if (sysfs_streq(str, "bulk")) {
+		nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_BULK;
+		return 1;
+	}
+
+	pr_warn("[NACC][uaccess-tx] unknown nacc.uaccess_tx_report=%s, keeping all\n",
+		str);
+	return 1;
+}
+__setup("nacc.uaccess_tx_report=", nacc_uaccess_tx_report_setup);
 
 unsigned long nacc_mm_state(struct mm_struct *mm)
 {
@@ -250,6 +281,95 @@ void nacc_private_data_uaccess_exit(void)
 					      false);
 }
 EXPORT_SYMBOL(nacc_private_data_uaccess_exit);
+
+static const char *nacc_uaccess_tx_api_kind_name(enum nacc_uaccess_tx_api_kind api_kind)
+{
+	switch (api_kind) {
+	case NACC_UACCESS_TX_COPY_FROM_USER:
+		return "copy_from_user";
+	case NACC_UACCESS_TX_COPY_TO_USER:
+		return "copy_to_user";
+	case NACC_UACCESS_TX_GET_USER:
+		return "get_user";
+	case NACC_UACCESS_TX_PUT_USER:
+		return "put_user";
+	case NACC_UACCESS_TX_CLEAR_USER:
+		return "clear_user";
+	default:
+		return "unknown";
+	}
+}
+
+static const char *nacc_uaccess_tx_direction_name(enum nacc_uaccess_tx_direction direction)
+{
+	switch (direction) {
+	case NACC_UACCESS_TX_DIR_FROM_USER:
+		return "from_user";
+	case NACC_UACCESS_TX_DIR_TO_USER:
+		return "to_user";
+	case NACC_UACCESS_TX_DIR_ZERO_TO_USER:
+		return "zero_to_user";
+	case NACC_UACCESS_TX_DIR_UNKNOWN:
+	default:
+		return "unknown";
+	}
+}
+
+static bool nacc_uaccess_tx_should_report(enum nacc_uaccess_tx_api_kind api_kind)
+{
+	if (nacc_uaccess_tx_report_mode != NACC_UACCESS_TX_REPORT_BULK)
+		return true;
+
+	return api_kind != NACC_UACCESS_TX_GET_USER &&
+	       api_kind != NACC_UACCESS_TX_PUT_USER;
+}
+
+u64 nacc_uaccess_tx_begin(enum nacc_uaccess_tx_api_kind api_kind,
+			  enum nacc_uaccess_tx_direction direction,
+			  unsigned long caller_pc,
+			  unsigned long user_va,
+			  unsigned long bytes)
+{
+	u64 tx_id;
+
+	if (!current->mm)
+		return 0;
+	if (!current->thread.nacc_cid)
+		return 0;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return 0;
+	if (!nacc_uaccess_tx_should_report(api_kind))
+		return 0;
+
+	tx_id = atomic64_inc_return(&nacc_uaccess_tx_next_id);
+	printk(KERN_ERR "[NACC][uaccess-tx-begin] tx_id=%llu api_kind=%s direction=%s pid=%d tgid=%d cid=%lx user_va=%lx len=%lu caller=%lx\n",
+	       tx_id, nacc_uaccess_tx_api_kind_name(api_kind),
+	       nacc_uaccess_tx_direction_name(direction), current->pid,
+	       current->tgid, current->thread.nacc_cid, user_va, bytes,
+	       caller_pc);
+
+	return tx_id;
+}
+EXPORT_SYMBOL(nacc_uaccess_tx_begin);
+
+void nacc_uaccess_tx_end(u64 tx_id,
+			 enum nacc_uaccess_tx_api_kind api_kind,
+			 enum nacc_uaccess_tx_direction direction,
+			 unsigned long caller_pc,
+			 unsigned long user_va,
+			 unsigned long bytes,
+			 long result)
+{
+	if (!tx_id)
+		return;
+
+	printk(KERN_ERR "[NACC][uaccess-tx-end] tx_id=%llu api_kind=%s direction=%s pid=%d tgid=%d cid=%lx user_va=%lx len=%lu caller=%lx result=%ld\n",
+	       tx_id, nacc_uaccess_tx_api_kind_name(api_kind),
+	       nacc_uaccess_tx_direction_name(direction), current->pid,
+	       current->tgid, current->thread.nacc_cid, user_va, bytes,
+	       caller_pc, result);
+}
+EXPORT_SYMBOL(nacc_uaccess_tx_end);
 
 static int nacc_region_sync_begin_sbi(unsigned long root_pgd_pa,
 				      unsigned long cid,

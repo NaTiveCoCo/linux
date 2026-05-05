@@ -164,10 +164,21 @@ do {								\
 #define get_user(x, ptr)					\
 ({								\
 	const __typeof__(*(ptr)) __user *__p = (ptr);		\
+	u64 __nacc_tx_id;					\
+	unsigned long __nacc_caller;				\
+	long __ret;						\
 	might_fault();						\
-	access_ok(__p, sizeof(*__p)) ?		\
+	__nacc_caller = _RET_IP_;				\
+	__nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_GET_USER, \
+		NACC_UACCESS_TX_DIR_FROM_USER, __nacc_caller,	\
+		(unsigned long)__p, sizeof(*__p));		\
+	__ret = access_ok(__p, sizeof(*__p)) ?			\
 		__get_user((x), __p) :				\
 		((x) = (__force __typeof__(x))0, -EFAULT);	\
+	nacc_uaccess_tx_end(__nacc_tx_id, NACC_UACCESS_TX_GET_USER, \
+		NACC_UACCESS_TX_DIR_FROM_USER, __nacc_caller,	\
+		(unsigned long)__p, sizeof(*__p), __ret);	\
+	__ret;							\
 })
 
 #define __put_user_asm(insn, x, ptr, err)			\
@@ -280,10 +291,21 @@ do {								\
 #define put_user(x, ptr)					\
 ({								\
 	__typeof__(*(ptr)) __user *__p = (ptr);			\
+	u64 __nacc_tx_id;					\
+	unsigned long __nacc_caller;				\
+	long __ret;						\
 	might_fault();						\
-	access_ok(__p, sizeof(*__p)) ?		\
+	__nacc_caller = _RET_IP_;				\
+	__nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_PUT_USER, \
+		NACC_UACCESS_TX_DIR_TO_USER, __nacc_caller,	\
+		(unsigned long)__p, sizeof(*__p));		\
+	__ret = access_ok(__p, sizeof(*__p)) ?			\
 		__put_user((x), __p) :				\
 		-EFAULT;					\
+	nacc_uaccess_tx_end(__nacc_tx_id, NACC_UACCESS_TX_PUT_USER, \
+		NACC_UACCESS_TX_DIR_TO_USER, __nacc_caller,	\
+		(unsigned long)__p, sizeof(*__p), __ret);	\
+	__ret;							\
 })
 
 
@@ -326,9 +348,20 @@ unsigned long __must_check __clear_user(void __user *addr, unsigned long n);
 static inline
 unsigned long __must_check clear_user(void __user *to, unsigned long n)
 {
+	u64 nacc_tx_id;
+	unsigned long nacc_caller;
+	unsigned long ret;
+
 	might_fault();
-	return access_ok(to, n) ?
-		__clear_user(to, n) : n;
+	nacc_caller = _RET_IP_;
+	nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_CLEAR_USER,
+					   NACC_UACCESS_TX_DIR_ZERO_TO_USER,
+					   nacc_caller, (unsigned long)to, n);
+	ret = access_ok(to, n) ? __clear_user(to, n) : n;
+	nacc_uaccess_tx_end(nacc_tx_id, NACC_UACCESS_TX_CLEAR_USER,
+			    NACC_UACCESS_TX_DIR_ZERO_TO_USER,
+			    nacc_caller, (unsigned long)to, n, ret);
+	return ret;
 }
 
 #define __get_kernel_nofault(dst, src, type, err_label)			\

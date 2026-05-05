@@ -74,6 +74,21 @@ enum nacc_private_data_uaccess_direction {
 	NACC_PD_UACCESS_TO_USER = 2,
 };
 
+enum nacc_uaccess_tx_api_kind {
+	NACC_UACCESS_TX_COPY_FROM_USER = 1,
+	NACC_UACCESS_TX_COPY_TO_USER = 2,
+	NACC_UACCESS_TX_GET_USER = 3,
+	NACC_UACCESS_TX_PUT_USER = 4,
+	NACC_UACCESS_TX_CLEAR_USER = 5,
+};
+
+enum nacc_uaccess_tx_direction {
+	NACC_UACCESS_TX_DIR_UNKNOWN = 0,
+	NACC_UACCESS_TX_DIR_FROM_USER = 1,
+	NACC_UACCESS_TX_DIR_TO_USER = 2,
+	NACC_UACCESS_TX_DIR_ZERO_TO_USER = 3,
+};
+
 /* 
  * The agent has already been initialized, and the new child process is forked.
  * This flag is set in the child process.
@@ -184,6 +199,18 @@ void nacc_private_data_uaccess_enter(unsigned long direction,
 				     unsigned long user_va,
 				     unsigned long bytes);
 void nacc_private_data_uaccess_exit(void);
+u64 nacc_uaccess_tx_begin(enum nacc_uaccess_tx_api_kind api_kind,
+			  enum nacc_uaccess_tx_direction direction,
+			  unsigned long caller_pc,
+			  unsigned long user_va,
+			  unsigned long bytes);
+void nacc_uaccess_tx_end(u64 tx_id,
+			 enum nacc_uaccess_tx_api_kind api_kind,
+			 enum nacc_uaccess_tx_direction direction,
+			 unsigned long caller_pc,
+			 unsigned long user_va,
+			 unsigned long bytes,
+			 long result);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
