@@ -20,6 +20,7 @@ extern unsigned long nacc_mappings_virt;
 enum nacc_uaccess_tx_report_mode {
 	NACC_UACCESS_TX_REPORT_ALL = 0,
 	NACC_UACCESS_TX_REPORT_BULK = 1,
+	NACC_UACCESS_TX_REPORT_CENSUS = 2,
 };
 
 static const char *nacc_ptp_level_name(unsigned int level)
@@ -75,6 +76,11 @@ static int __init nacc_uaccess_tx_report_setup(char *str)
 
 	if (sysfs_streq(str, "bulk")) {
 		nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_BULK;
+		return 1;
+	}
+
+	if (sysfs_streq(str, "census")) {
+		nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_CENSUS;
 		return 1;
 	}
 
@@ -317,11 +323,46 @@ static const char *nacc_uaccess_tx_direction_name(enum nacc_uaccess_tx_direction
 
 static bool nacc_uaccess_tx_should_report(enum nacc_uaccess_tx_api_kind api_kind)
 {
+	if (nacc_uaccess_tx_report_mode == NACC_UACCESS_TX_REPORT_CENSUS)
+		return false;
+
 	if (nacc_uaccess_tx_report_mode != NACC_UACCESS_TX_REPORT_BULK)
 		return true;
 
 	return api_kind != NACC_UACCESS_TX_GET_USER &&
 	       api_kind != NACC_UACCESS_TX_PUT_USER;
+}
+
+static bool nacc_uaccess_tx_census_enabled(void)
+{
+	return nacc_uaccess_tx_report_mode == NACC_UACCESS_TX_REPORT_CENSUS;
+}
+
+static void nacc_uaccess_tx_context_sbi(enum nacc_uaccess_tx_api_kind api_kind,
+					enum nacc_uaccess_tx_direction direction,
+					bool active)
+{
+	unsigned long root_pgd_pa;
+	struct sbiret ret;
+
+	if (!current->mm || !current->mm->pgd)
+		return;
+	if (!current->thread.nacc_cid)
+		return;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return;
+
+	root_pgd_pa = virt_to_phys(current->mm->pgd);
+	ret = sbi_ecall(SBI_EXT_NACC,
+			SBI_EXT_NACC_PRIVATE_DATA_TX_CONTEXT,
+			current->pid, (unsigned long)current, root_pgd_pa,
+			api_kind, direction, active ? 1UL : 0UL);
+	if (ret.error) {
+		printk_ratelimited(KERN_ERR "[Linux]: PRIVATE_DATA tx context update failed pid=%d api=%s active=%d err=%ld val=%ld\n",
+				   current->pid,
+				   nacc_uaccess_tx_api_kind_name(api_kind),
+				   active ? 1 : 0, ret.error, ret.value);
+	}
 }
 
 u64 nacc_uaccess_tx_begin(enum nacc_uaccess_tx_api_kind api_kind,
@@ -338,6 +379,13 @@ u64 nacc_uaccess_tx_begin(enum nacc_uaccess_tx_api_kind api_kind,
 		return 0;
 	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
 		return 0;
+
+	if (nacc_uaccess_tx_census_enabled()) {
+		tx_id = atomic64_inc_return(&nacc_uaccess_tx_next_id);
+		nacc_uaccess_tx_context_sbi(api_kind, direction, true);
+		return tx_id;
+	}
+
 	if (!nacc_uaccess_tx_should_report(api_kind))
 		return 0;
 
@@ -362,6 +410,11 @@ void nacc_uaccess_tx_end(u64 tx_id,
 {
 	if (!tx_id)
 		return;
+
+	if (nacc_uaccess_tx_census_enabled()) {
+		nacc_uaccess_tx_context_sbi(api_kind, direction, false);
+		return;
+	}
 
 	printk(KERN_ERR "[NACC][uaccess-tx-end] tx_id=%llu api_kind=%s direction=%s pid=%d tgid=%d cid=%lx user_va=%lx len=%lu caller=%lx result=%ld\n",
 	       tx_id, nacc_uaccess_tx_api_kind_name(api_kind),

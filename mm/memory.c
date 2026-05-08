@@ -202,7 +202,12 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 		token_pfn = page_to_pfn(token);
 		if (nacc_pfn_is_secure_ptp(token_pfn))
 			nacc_track_secure_ptp_pfn(token_pfn);
-		pmd_clear(pmd);
+		if (nacc_is_secure_ptp_virt(pmd) && nacc_use_secure_pt(tlb->mm))
+			nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
+					    __pa(pmd), 0, addr,
+					    __pa(tlb->mm->pgd), 0);
+		else
+			pmd_clear(pmd);
 		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
 
 		if (nacc_pfn_is_secure_ptp(token_pfn)) {

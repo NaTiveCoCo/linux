@@ -7,6 +7,7 @@
 
 #include <linux/syscalls.h>
 #include <linux/errno.h>
+#include <linux/kernel.h>
 #include <linux/mm.h>
 #include <linux/sched/signal.h>
 #include <asm/cacheflush.h>
@@ -523,6 +524,25 @@ void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr)
 		printk(KERN_ERR "[Linux]: nacc_wrprotect_ptes_sbi failed: ptep_pa=%lx nr=%u err=%ld val=%ld\n",
 		       ptep_pa, nr, ret.error, ret.value);
 	}
+}
+
+unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
+				  unsigned long operand, unsigned long start_va,
+				  unsigned long root_pgd_pa,
+				  unsigned long flags)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UPDATE_PTE, op, ptep_pa,
+			operand, start_va, root_pgd_pa, flags);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_update_pte_sbi failed: op=%lu ptep_pa=%lx operand=%lx start_va=%lx root=%lx flags=%lx err=%ld val=%ld\n",
+		       op, ptep_pa, operand, start_va, root_pgd_pa, flags,
+		       ret.error, ret.value);
+		panic("NaCC secure PTE update ecall failed");
+	}
+
+	return ret.value;
 }
 
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)

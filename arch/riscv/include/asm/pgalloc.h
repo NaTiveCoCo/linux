@@ -38,8 +38,15 @@ static inline void pmd_populate(struct mm_struct *mm,
 	pmd_t *pmd, pgtable_t pte)
 {
 	unsigned long pfn = virt_to_pfn(page_address(pte));
+	pmd_t new_pmd = __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE);
 
-	set_pmd(pmd, __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	if (mm && nacc_is_secure_ptp_virt(pmd) && nacc_use_secure_pt(mm)) {
+		nacc_set_ptes_sbi(__pa(pmd), pmd_val(new_pmd), 1, 0,
+				  __pa(mm->pgd));
+		return;
+	}
+
+	set_pmd(pmd, new_pmd);
 }
 
 #ifndef __PAGETABLE_PMD_FOLDED

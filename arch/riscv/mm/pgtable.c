@@ -35,6 +35,13 @@ int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long address,
 			      pte_t *ptep)
 {
+#ifdef CONFIG_RISCV
+	if (vma && vma->vm_mm && nacc_is_secure_ptp_virt(ptep) &&
+	    nacc_use_secure_pt(vma->vm_mm))
+		return nacc_update_pte_sbi(
+			NACC_UPDATE_PTE_TEST_CLEAR_YOUNG_ONE,
+			__pa(ptep), 0, address, __pa(vma->vm_mm->pgd), 0);
+#endif
 	if (!pte_young(ptep_get(ptep)))
 		return 0;
 	return test_and_clear_bit(_PAGE_ACCESSED_OFFSET, &pte_val(*ptep));

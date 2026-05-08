@@ -630,7 +630,18 @@ extern int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long a
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
+#ifdef CONFIG_RISCV
+	pte_t pte;
+
+	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm))
+		pte = __pte(nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
+						__pa(ptep), 0, address,
+						__pa(mm->pgd), 0));
+	else
+		pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
+#else
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
+#endif
     if(current->thread.nacc_flag & NACC_INITED) {
         printk(KERN_ERR "[ptep_get_and_clear]: address: %lx, pte: %lx\n", address, pte_val(pte));   
     }
@@ -860,7 +871,18 @@ static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 					unsigned long address, pmd_t *pmdp)
 {
+#ifdef CONFIG_RISCV
+	pmd_t pmd;
+
+	if (mm && nacc_is_secure_ptp_virt(pmdp) && nacc_use_secure_pt(mm))
+		pmd = __pmd(nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
+						__pa(pmdp), 0, address,
+						__pa(mm->pgd), 0));
+	else
+		pmd = __pmd(atomic_long_xchg((atomic_long_t *)pmdp, 0));
+#else
 	pmd_t pmd = __pmd(atomic_long_xchg((atomic_long_t *)pmdp, 0));
+#endif
 
 	page_table_check_pmd_clear(mm, pmd);
 
@@ -879,6 +901,14 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 				unsigned long address, pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(vma->vm_mm, pmdp, pmd);
+#ifdef CONFIG_RISCV
+	if (vma->vm_mm && nacc_is_secure_ptp_virt(pmdp) &&
+	    nacc_use_secure_pt(vma->vm_mm))
+		return __pmd(nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
+						 __pa(pmdp), pmd_val(pmd),
+						 address, __pa(vma->vm_mm->pgd),
+						 0));
+#endif
 	return __pmd(atomic_long_xchg((atomic_long_t *)pmdp, pmd_val(pmd)));
 }
 
