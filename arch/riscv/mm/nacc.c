@@ -62,7 +62,11 @@ static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
 
 DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
 static atomic64_t nacc_uaccess_tx_next_id = ATOMIC64_INIT(0);
+#ifdef NACC_PROFILE
+static int nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_BULK;
+#else
 static int nacc_uaccess_tx_report_mode = NACC_UACCESS_TX_REPORT_ALL;
+#endif
 
 static int __init nacc_uaccess_tx_report_setup(char *str)
 {
@@ -84,7 +88,7 @@ static int __init nacc_uaccess_tx_report_setup(char *str)
 		return 1;
 	}
 
-	pr_warn("[NACC][uaccess-tx] unknown nacc.uaccess_tx_report=%s, keeping all\n",
+	pr_warn("[NACC][uaccess-tx] unknown nacc.uaccess_tx_report=%s, keeping current mode\n",
 		str);
 	return 1;
 }

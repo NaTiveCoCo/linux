@@ -1018,7 +1018,7 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 
 	/* If it's a COW mapping, write protect it both processes. */
 	if (is_cow_mapping(src_vma->vm_flags) && pte_write(pte)) {
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 		if (unlikely(nacc_use_secure_pt(src_mm))) {
 			printk_ratelimited("[Linux]: copy_present_ptes: NaCC wrprotect src_mm=%px addr=%lx nr=%d\n",
 					   src_mm, addr, nr);
@@ -1036,7 +1036,7 @@ static __always_inline void __copy_present_ptes(struct vm_area_struct *dst_vma,
 	if (!userfaultfd_wp(dst_vma))
 		pte = pte_clear_uffd_wp(pte);
 
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 	if (unlikely(nacc_use_secure_pt(src_mm))) {
 		printk_ratelimited("[Linux]: copy_present_ptes: NaCC set child ptes dst_mm=%px addr=%lx nr=%d\n",
 				   dst_vma->vm_mm, addr, nr);
@@ -1441,7 +1441,7 @@ copy_page_range(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	bool is_cow;
 	int ret;
 
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 	if (unlikely(nacc_use_secure_pt(src_mm))) {
 		printk(KERN_ERR "[Linux]: copy_page_range: NaCC source mm=%px dst_mm=%px [%lx, %lx) flags=%lx\n",
 		       src_mm, dst_mm, addr, end, src_vma->vm_flags);

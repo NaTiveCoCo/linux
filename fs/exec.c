@@ -73,7 +73,7 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 #include <asm/nacc.h>
 #endif
 
@@ -389,7 +389,7 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (!mm)
 		goto err;
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (current->thread.nacc_flag == NACC_PREPARE ||
 	    current->thread.nacc_flag == NACC_INITED ||
 	    current->thread.nacc_flag == NACC_FORKED ||
@@ -409,7 +409,7 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	if (err)
 		goto err;
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (current->thread.nacc_flag == NACC_PREPARE ||
 	    current->thread.nacc_flag == NACC_INITED ||
 	    current->thread.nacc_flag == NACC_FORKED ||
@@ -1307,7 +1307,7 @@ int begin_new_exec(struct linux_binprm * bprm)
 	if (retval)
 		goto out;
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	/*
 	 * Exec-build security is now keyed off the new bprm->mm state that was
 	 * set in bprm_mm_init(). Keep this late flag switch only as a dispatch
@@ -1519,7 +1519,7 @@ static void do_close_execat(struct file *file)
 		fput(file);
 }
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 static void nacc_prepare_exec_build_state(struct linux_binprm *bprm)
 {
 	if (current->thread.nacc_flag != NACC_INITED)
@@ -1545,7 +1545,7 @@ static void nacc_restore_exec_build_state(struct linux_binprm *bprm)
 
 static void free_bprm(struct linux_binprm *bprm)
 {
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	nacc_restore_exec_build_state(bprm);
 #endif
 	if (bprm->mm) {
@@ -1612,7 +1612,7 @@ static struct linux_binprm *alloc_bprm(int fd, struct filename *filename, int fl
 	}
 	bprm->interp = bprm->filename;
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	nacc_prepare_exec_build_state(bprm);
 #endif
 
@@ -1928,7 +1928,7 @@ static int bprm_execve(struct linux_binprm *bprm)
 	user_events_execve(current);
 	acct_update_integrals(current);
 	task_numa_free(current, false);
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (current->thread.nacc_flag == NACC_PREPARE) {
 		nacc_invoke();
 	} else if (current->thread.nacc_flag == NACC_FORKED) {
@@ -1995,7 +1995,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 		goto out_ret;
 	}
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (current->thread.nacc_flag) {
 		printk(KERN_ERR "[Linux]: do_execveat_common pid=%d comm=%s nacc_flag=%lx filename=%s\n",
 		       current->pid, current->comm, current->thread.nacc_flag,

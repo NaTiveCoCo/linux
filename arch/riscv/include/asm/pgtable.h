@@ -11,7 +11,7 @@
 
 #include <asm/pgtable-bits.h>
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 #include <asm/nacc.h>
 #endif
 
@@ -250,7 +250,7 @@ static inline void set_pmd(pmd_t *pmdp, pmd_t pmd)
 	WRITE_ONCE(*pmdp, pmd);
 }
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 
 static inline bool nacc_is_secure_ptp_virt(const void *ptr)
 {
@@ -574,7 +574,7 @@ static inline void __set_pte_at(struct mm_struct *mm, unsigned long addr,
 	if (pte_present(pteval) && pte_exec(pteval))
 		flush_icache_pte(mm, pteval);
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
 		/*
 		 * NaCC secure PTP pages are readable in S-mode but must be
@@ -595,7 +595,7 @@ static inline void set_ptes(struct mm_struct *mm, unsigned long addr,
 {
 	page_table_check_ptes_set(mm, ptep, pteval, nr);
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
 		nacc_set_ptes_sbi(__pa(ptep), pte_val(pteval), nr, addr,
 				  __pa(mm->pgd));
@@ -630,7 +630,7 @@ extern int ptep_test_and_clear_young(struct vm_area_struct *vma, unsigned long a
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	pte_t pte;
 
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm))
@@ -642,9 +642,11 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 #else
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
 #endif
+#if defined(NACC) && defined(NACC_PROFILE)
     if(current->thread.nacc_flag & NACC_INITED) {
         printk(KERN_ERR "[ptep_get_and_clear]: address: %lx, pte: %lx\n", address, pte_val(pte));   
     }
+#endif
 	page_table_check_pte_clear(mm, pte);
 
 	return pte;
@@ -654,7 +656,7 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 static inline void ptep_set_wrprotect(struct mm_struct *mm,
 				      unsigned long address, pte_t *ptep)
 {
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
 		nacc_wrprotect_ptes_sbi(__pa(ptep), 1);
 		return;
@@ -871,7 +873,7 @@ static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 static inline pmd_t pmdp_huge_get_and_clear(struct mm_struct *mm,
 					unsigned long address, pmd_t *pmdp)
 {
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	pmd_t pmd;
 
 	if (mm && nacc_is_secure_ptp_virt(pmdp) && nacc_use_secure_pt(mm))
@@ -901,7 +903,7 @@ static inline pmd_t pmdp_establish(struct vm_area_struct *vma,
 				unsigned long address, pmd_t *pmdp, pmd_t pmd)
 {
 	page_table_check_pmd_set(vma->vm_mm, pmdp, pmd);
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (vma->vm_mm && nacc_is_secure_ptp_virt(pmdp) &&
 	    nacc_use_secure_pt(vma->vm_mm))
 		return __pmd(nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,

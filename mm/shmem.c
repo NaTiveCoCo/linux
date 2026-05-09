@@ -40,14 +40,14 @@
 #include <linux/fs_parser.h>
 #include <linux/swapfile.h>
 #include <linux/iversion.h>
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 #include <asm/nacc.h>
 #endif
 #include "swap.h"
 
 static struct vfsmount *shm_mnt __ro_after_init;
 
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 static inline bool nacc_trace_shmem_path(struct mm_struct *mm)
 {
 	if (!mm)
@@ -83,7 +83,7 @@ static inline void nacc_log_shmem_path(const char *tag, struct file *file,
 				       long extra)
 {
 }
-#endif
+#endif /* defined(NACC) && defined(NACC_PROFILE) */
 
 #ifdef CONFIG_SHMEM
 /*

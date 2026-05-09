@@ -7,9 +7,9 @@
 #define GFP_PGTABLE_KERNEL	(GFP_KERNEL | __GFP_ZERO)
 #define GFP_PGTABLE_USER	(GFP_PGTABLE_KERNEL | __GFP_ACCOUNT)
 
+#ifdef NACC
 #include <asm/sbi.h>
 
-#ifdef CONFIG_RISCV
 static inline bool nacc_free_secure_ptdesc(struct ptdesc *ptdesc,
 					       unsigned int level,
 					       const char *tag)
@@ -23,7 +23,7 @@ static inline bool nacc_free_secure_ptdesc(struct ptdesc *ptdesc,
 	nacc_reclaim_ptp_dtor(ptdesc, pfn, level, tag);
 	return true;
 }
-#endif
+#endif /* NACC */
 
 /**
  * __pte_alloc_one_kernel - allocate memory for a PTE-level kernel page table
@@ -86,6 +86,7 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 	struct ptdesc *ptdesc;
 	unsigned long new_pte_pfn = 0;
 
+#ifdef NACC
 	if (mm && nacc_use_secure_pt(mm)) {
 		unsigned long *new_pte_pfn_buf =
 			kmalloc(sizeof(unsigned long), GFP_KERNEL);
@@ -105,6 +106,7 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 		ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
 		return ptdesc_page(ptdesc);
 	}
+#endif
 
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
@@ -148,7 +150,7 @@ static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 {
 	struct ptdesc *ptdesc = page_ptdesc(pte_page);
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (nacc_free_secure_ptdesc(ptdesc, 0, "pte_free"))
 		return;
 #endif
@@ -180,6 +182,7 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 	if (mm == &init_mm)
 		gfp = GFP_PGTABLE_KERNEL;
 
+#ifdef NACC
 	if (mm && nacc_use_secure_pt(mm)) {
 		if (addr < 0x4000000000) {
 			unsigned long *new_pte_pfn_buf =
@@ -202,6 +205,7 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 			return ptdesc_address(ptdesc);
 		}
 	}
+#endif
 
 	ptdesc = pagetable_alloc_noprof(gfp, 0);
 	if (!ptdesc)
@@ -222,7 +226,7 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
 
 	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (nacc_free_secure_ptdesc(ptdesc, 1, "pmd_free"))
 		return;
 #endif

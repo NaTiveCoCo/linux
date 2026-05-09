@@ -16,7 +16,7 @@
 #include <asm/pgalloc.h>
 #include <asm/tlb.h>
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 #include <asm/nacc.h>
 #endif
 /*

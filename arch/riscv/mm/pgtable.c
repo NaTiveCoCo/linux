@@ -35,7 +35,7 @@ int ptep_test_and_clear_young(struct vm_area_struct *vma,
 			      unsigned long address,
 			      pte_t *ptep)
 {
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	if (vma && vma->vm_mm && nacc_is_secure_ptp_virt(ptep) &&
 	    nacc_use_secure_pt(vma->vm_mm))
 		return nacc_update_pte_sbi(

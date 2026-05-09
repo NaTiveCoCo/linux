@@ -161,6 +161,7 @@ do {								\
  * Returns zero on success, or -EFAULT on error.
  * On error, the variable @x is set to zero.
  */
+#if defined(NACC) && defined(NACC_PROFILE)
 #define get_user(x, ptr)					\
 ({								\
 	const __typeof__(*(ptr)) __user *__p = (ptr);		\
@@ -180,6 +181,18 @@ do {								\
 		(unsigned long)__p, sizeof(*__p), __ret);	\
 	__ret;							\
 })
+#else
+#define get_user(x, ptr)					\
+({								\
+	const __typeof__(*(ptr)) __user *__p = (ptr);		\
+	long __ret;						\
+	might_fault();						\
+	__ret = access_ok(__p, sizeof(*__p)) ?			\
+		__get_user((x), __p) :				\
+		((x) = (__force __typeof__(x))0, -EFAULT);	\
+	__ret;							\
+})
+#endif
 
 #define __put_user_asm(insn, x, ptr, err)			\
 do {								\
@@ -288,6 +301,7 @@ do {								\
  *
  * Returns zero on success, or -EFAULT on error.
  */
+#if defined(NACC) && defined(NACC_PROFILE)
 #define put_user(x, ptr)					\
 ({								\
 	__typeof__(*(ptr)) __user *__p = (ptr);			\
@@ -307,6 +321,18 @@ do {								\
 		(unsigned long)__p, sizeof(*__p), __ret);	\
 	__ret;							\
 })
+#else
+#define put_user(x, ptr)					\
+({								\
+	__typeof__(*(ptr)) __user *__p = (ptr);			\
+	long __ret;						\
+	might_fault();						\
+	__ret = access_ok(__p, sizeof(*__p)) ?			\
+		__put_user((x), __p) :				\
+		-EFAULT;					\
+	__ret;							\
+})
+#endif
 
 
 unsigned long __must_check __asm_copy_to_user(void __user *to,
@@ -319,10 +345,14 @@ raw_copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	unsigned long ret;
 
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_private_data_uaccess_enter(NACC_PD_UACCESS_FROM_USER, _RET_IP_,
 					(unsigned long)from, n);
+#endif
 	ret = __asm_copy_from_user(to, from, n);
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_private_data_uaccess_exit();
+#endif
 	return ret;
 }
 
@@ -331,10 +361,14 @@ raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	unsigned long ret;
 
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_private_data_uaccess_enter(NACC_PD_UACCESS_TO_USER, _RET_IP_,
 					(unsigned long)to, n);
+#endif
 	ret = __asm_copy_to_user(to, from, n);
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_private_data_uaccess_exit();
+#endif
 	return ret;
 }
 
@@ -348,19 +382,25 @@ unsigned long __must_check __clear_user(void __user *addr, unsigned long n);
 static inline
 unsigned long __must_check clear_user(void __user *to, unsigned long n)
 {
+#if defined(NACC) && defined(NACC_PROFILE)
 	u64 nacc_tx_id;
 	unsigned long nacc_caller;
+#endif
 	unsigned long ret;
 
 	might_fault();
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_caller = _RET_IP_;
 	nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_CLEAR_USER,
 					   NACC_UACCESS_TX_DIR_ZERO_TO_USER,
 					   nacc_caller, (unsigned long)to, n);
+#endif
 	ret = access_ok(to, n) ? __clear_user(to, n) : n;
+#if defined(NACC) && defined(NACC_PROFILE)
 	nacc_uaccess_tx_end(nacc_tx_id, NACC_UACCESS_TX_CLEAR_USER,
 			    NACC_UACCESS_TX_DIR_ZERO_TO_USER,
 			    nacc_caller, (unsigned long)to, n, ret);
+#endif
 	return ret;
 }
 

@@ -64,7 +64,7 @@
 #define arch_mmap_check(addr, len, flags)	(0)
 #endif
 
-#ifdef CONFIG_RISCV
+#if defined(NACC) && defined(NACC_PROFILE)
 static inline bool nacc_trace_mmap_syscall(struct mm_struct *mm)
 {
 	if (!mm)
@@ -148,7 +148,7 @@ static inline void nacc_log_shmem_mmap_state(const char *tag, struct mm_struct *
 					     long extra)
 {
 }
-#endif
+#endif /* defined(NACC) && defined(NACC_PROFILE) */
 
 #ifdef CONFIG_HAVE_ARCH_MMAP_RND_BITS
 const int mmap_rnd_bits_min = CONFIG_ARCH_MMAP_RND_BITS_MIN;

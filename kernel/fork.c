@@ -113,7 +113,7 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 #include <asm/nacc.h>
 #include <asm/sbi.h>
 #endif
@@ -761,10 +761,12 @@ static __latent_entropy int dup_mmap(struct mm_struct *mm,
 	}
 	/* a new mm has just been created */
 	retval = arch_dup_mmap(oldmm, mm);
+#ifdef NACC
 	if (!retval && nacc_region_sync_mm_locked(mm,
 					       NACC_REGION_SYNC_REASON_FORK))
 		printk(KERN_ERR "[Linux]: fork region sync failed for child mm=%px pgd=%px\n",
 		       mm, mm->pgd);
+#endif
 
 loop_out:
 	vma_iter_free(&vmi);
@@ -2764,7 +2766,9 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 	struct task_struct *p;
 	int trace = 0;
 	pid_t nr;
+#ifdef NACC
 	pid_t nacc_nr;
+#endif
 
 	/*
 	 * For legacy clone() calls, CLONE_PIDFD uses the parent_tid argument
@@ -2812,7 +2816,9 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 
 	pid = get_task_pid(p, PIDTYPE_PID);
 	nr = pid_vnr(pid);
+#ifdef NACC
 	nacc_nr = pid_nr(pid);
+#endif
 
 	if (clone_flags & CLONE_PARENT_SETTID)
 		put_user(nr, args->parent_tid);
@@ -2830,7 +2836,7 @@ pid_t kernel_clone(struct kernel_clone_args *args)
 		task_unlock(p);
 	}
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 	nacc_register_forked_child_pid(nacc_nr);
 #endif
 

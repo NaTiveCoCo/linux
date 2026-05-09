@@ -68,7 +68,7 @@
 #include <linux/workqueue_api.h>
 
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 #define SBI_EXT_NACC 0x4E414343
 
 #define SBI_EXT_LINUX_VERIFY 0x4
@@ -5274,7 +5274,7 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 	calculate_sigpending();
 }
 
-#ifdef CONFIG_RISCV
+#ifdef NACC
 struct sbiret {
 	unsigned long error;
 	unsigned long value;
@@ -5336,7 +5336,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 		next->active_mm = prev->active_mm;
 		if (prev->mm) {                           // from user
-#ifdef CONFIG_RISCV
+#ifdef NACC
             /* if prev task_struct is nacc process */
             if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
@@ -5365,7 +5365,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 			/* will mmdrop_lazy_tlb() in finish_task_switch(). */
 			rq->prev_mm = prev->active_mm;
 			prev->active_mm = NULL;
-#ifdef CONFIG_RISCV
+#ifdef NACC
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
@@ -5373,7 +5373,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             }
 #endif
         } else {
-#ifdef CONFIG_RISCV
+#ifdef NACC
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag && prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
