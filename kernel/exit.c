@@ -76,6 +76,10 @@
 #include <asm/unistd.h>
 #include <asm/mmu_context.h>
 
+#ifdef NACC
+#include <asm/nacc.h>
+#endif
+
 #include "exit.h"
 
 /*
@@ -924,6 +928,9 @@ void __noreturn do_exit(long code)
 	taskstats_exit(tsk, group_dead);
 
 	exit_mm();
+#ifdef NACC
+	nacc_unregister_current_pid();
+#endif
 
 	if (group_dead)
 		acct_process();

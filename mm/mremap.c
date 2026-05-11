@@ -991,7 +991,6 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 	struct mm_struct *mm = current->mm;
 	struct vm_area_struct *vma;
 	unsigned long ret = -EINVAL;
-	bool need_region_sync = nacc_mm_needs_region_sync(mm);
 	bool locked = false;
 	struct vm_userfaultfd_ctx uf = NULL_VM_UFFD_CTX;
 	LIST_HEAD(uf_unmap_early);
@@ -1095,13 +1094,11 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 		}
 
 		ret = do_vmi_munmap(&vmi, mm, addr + new_len, old_len - new_len,
-				    &uf_unmap, need_region_sync ? false : true);
+				    &uf_unmap, true);
 		if (ret)
 			goto out;
 
 		ret = addr;
-		if (need_region_sync)
-			goto out;
 		goto out_unlocked;
 	}
 
@@ -1185,8 +1182,6 @@ SYSCALL_DEFINE5(mremap, unsigned long, addr, unsigned long, old_len,
 out:
 	if (offset_in_page(ret))
 		locked = false;
-	if (!IS_ERR_VALUE(ret) && need_region_sync)
-		nacc_region_sync_mm_locked(mm, NACC_REGION_SYNC_REASON_MREMAP);
 	mmap_write_unlock(current->mm);
 	if (locked && new_len > old_len)
 		mm_populate(new_addr + old_len, new_len - old_len);

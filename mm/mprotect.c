@@ -854,9 +854,6 @@ static int do_mprotect_pkey(unsigned long start, size_t len,
 
 	if (!error && tmp < end)
 		error = -ENOMEM;
-	if (!error)
-		nacc_region_sync_mm_locked(current->mm,
-					   NACC_REGION_SYNC_REASON_MPROTECT);
 
 out:
 	mmap_write_unlock(current->mm);

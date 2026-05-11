@@ -219,9 +219,6 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     printk(KERN_ERR "[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
 
     nacc_activate_current_mm(tag);
-    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_INVOKE))
-        printk(KERN_ERR "[Linux]: %s region sync failed for mm=%px\n",
-               tag, current->mm);
 
     /*
      * RISC-V ELF startup treats entry a0 as rtld_fini. At this point the
@@ -344,9 +341,6 @@ void nacc_exec(void)
      * seeing the transient REEXEC flag forever.
      */
     nacc_activate_current_mm("nacc_exec");
-    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
-        printk(KERN_ERR "[Linux]: nacc_exec region sync failed for mm=%px\n",
-               current->mm);
     current->thread.nacc_flag = NACC_INITED;
     /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
     regs->a0 = 0;
@@ -389,9 +383,6 @@ void nacc_invoke_child(void)
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
      * The remaining args are unused since we don't jump into agent. */
     nacc_activate_current_mm("nacc_invoke_child");
-    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_EXEC))
-        printk(KERN_ERR "[Linux]: nacc_invoke_child region sync failed for mm=%px\n",
-               current->mm);
     /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
     regs->a0 = 0;
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
@@ -448,9 +439,6 @@ void nacc_attach_forked_child_if_needed(void)
     }
 
     nacc_activate_current_mm("nacc_attach_forked_child");
-    if (nacc_region_sync_mm(current->mm, NACC_REGION_SYNC_REASON_FORK))
-        printk(KERN_ERR "[Linux]: fork child attach region sync failed for mm=%px\n",
-               current->mm);
     /*
      * Child attach now follows the same non-returning lightweight agent shape
      * as exec attach: OpenSBI enters the agent and the agent returns directly
@@ -497,6 +485,26 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
         printk(KERN_ERR "[Linux]: early fork child pid registration failed: parent pid=%d child_pid=%lu cid=%lx err=%ld val=%ld\n",
                current->pid, child_pid, cid, ret.error, ret.value);
     }
+}
+
+void nacc_unregister_current_pid(void)
+{
+    unsigned long pid = task_pid_nr(current);
+    struct sbiret ret;
+
+    if (!current->thread.nacc_cid || !pid)
+        return;
+
+    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UNREGISTER, pid,
+                    0, 0, 0, 0, 0);
+    if (ret.error) {
+        printk(KERN_ERR "[Linux]: nacc unregister failed: pid=%lu cid=%lx err=%ld val=%ld\n",
+               pid, current->thread.nacc_cid, ret.error, ret.value);
+        return;
+    }
+
+    printk(KERN_ERR "[Linux]: nacc unregister pid=%lu cid=%lx\n",
+           pid, current->thread.nacc_cid);
 }
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
