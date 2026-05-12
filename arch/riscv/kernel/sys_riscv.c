@@ -219,6 +219,8 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     printk(KERN_ERR "[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
 
     nacc_activate_current_mm(tag);
+    if (nacc_detach_user_leaf_pages(current->mm, tag))
+        return;
 
     /*
      * RISC-V ELF startup treats entry a0 as rtld_fini. At this point the
@@ -342,6 +344,10 @@ void nacc_exec(void)
      */
     nacc_activate_current_mm("nacc_exec");
     current->thread.nacc_flag = NACC_INITED;
+    if (nacc_detach_user_leaf_pages(current->mm, "nacc_exec")) {
+        current->thread.nacc_flag = NACC_EXEC;
+        return;
+    }
     /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
     regs->a0 = 0;
 
@@ -383,6 +389,8 @@ void nacc_invoke_child(void)
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
      * The remaining args are unused since we don't jump into agent. */
     nacc_activate_current_mm("nacc_invoke_child");
+    if (nacc_detach_user_leaf_pages(current->mm, "nacc_invoke_child"))
+        return;
     /* Same RISC-V exec-entry a0 contract as the initial invoke path. */
     regs->a0 = 0;
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_INVOKE_CHILD, virt_agent, pid,
@@ -404,6 +412,7 @@ void nacc_attach_forked_child_if_needed(void)
     unsigned long virt_agent = 0;
     unsigned long user_pt_regs = 0;
     int vma_ret;
+    int detach_ret;
     struct sbiret ret;
 
     if (current->thread.nacc_flag != NACC_FORKED)
@@ -445,6 +454,13 @@ void nacc_attach_forked_child_if_needed(void)
      * to userspace after refreshing the trap contract for this child.
      */
     current->thread.nacc_flag = NACC_INITED;
+    detach_ret = nacc_detach_user_leaf_pages(current->mm,
+                                             "nacc_attach_forked_child");
+    if (detach_ret) {
+        current->thread.nacc_flag = NACC_FORKED;
+        nacc_fail_fork_child_attach("detach-user-leaves", detach_ret, pid, cid);
+        return;
+    }
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_ATTACH_FORKED_CHILD,
                     virt_agent, pid, cid, user_pt_regs, 0, 0);

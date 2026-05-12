@@ -81,6 +81,7 @@ void flush_reclaim_list(void);
 unsigned long nacc_mm_state(struct mm_struct *mm);
 void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask);
 bool nacc_mm_is_active(struct mm_struct *mm);
+int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag);
 
 static inline bool nacc_thread_is_inited(void)
 {

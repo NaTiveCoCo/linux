@@ -3,6 +3,7 @@
 // #include <linux/kernel.h>
 #include <linux/atomic.h>
 #include <linux/init.h>
+#include <linux/pagewalk.h>
 #include <linux/percpu.h>
 #include <linux/string.h>
 #include <asm/nacc.h>
@@ -11,8 +12,14 @@
 #include <asm/io.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
+#include <asm/tlbflush.h>
 
 extern unsigned long nacc_mappings_virt;
+
+#define NACC_USER_VPN2_PROTECTED_SLOTS 256UL
+#define NACC_USER_VPN2_SLOT_SIZE       (1UL << 30)
+#define NACC_USER_VPN2_PROTECTED_END \
+	(NACC_USER_VPN2_PROTECTED_SLOTS * NACC_USER_VPN2_SLOT_SIZE)
 
 enum nacc_uaccess_tx_report_mode {
 	NACC_UACCESS_TX_REPORT_ALL = 0,
@@ -117,6 +124,100 @@ bool nacc_mm_is_active(struct mm_struct *mm)
 	return !!(nacc_mm_state(mm) & NACC_MM_ACTIVE);
 }
 EXPORT_SYMBOL(nacc_mm_is_active);
+
+struct nacc_leaf_detach_stats {
+	unsigned long vmas;
+	unsigned long detached_ptes;
+	unsigned long already_special_ptes;
+	unsigned long non_user_ptes;
+	unsigned long empty_ptes;
+};
+
+static int nacc_detach_pre_vma(unsigned long start, unsigned long end,
+			       struct mm_walk *walk)
+{
+	struct nacc_leaf_detach_stats *stats = walk->private;
+
+	if (walk->vma) {
+		vm_flags_set(walk->vma, VM_MIXEDMAP);
+		stats->vmas++;
+	}
+
+	return 0;
+}
+
+static int nacc_detach_pte_entry(pte_t *ptep, unsigned long addr,
+				 unsigned long next, struct mm_walk *walk)
+{
+	struct nacc_leaf_detach_stats *stats = walk->private;
+	struct mm_struct *mm = walk->mm;
+	pte_t oldpte;
+	pte_t newpte;
+
+	oldpte = ptep_get(ptep);
+	if (!pte_present(oldpte)) {
+		stats->empty_ptes++;
+		return 0;
+	}
+
+	if (!pte_user(oldpte)) {
+		stats->non_user_ptes++;
+		return 0;
+	}
+
+	if (pte_special(oldpte)) {
+		stats->already_special_ptes++;
+		return 0;
+	}
+
+	newpte = pte_mkspecial(oldpte);
+	if (nacc_pfn_is_secure_ptp(virt_to_pfn(ptep)) && nacc_use_secure_pt(mm))
+		nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE, __pa(ptep),
+				    pte_val(newpte), addr, __pa(mm->pgd), 0);
+	else
+		set_pte(ptep, newpte);
+	stats->detached_ptes++;
+
+	return 0;
+}
+
+int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag)
+{
+	static const struct mm_walk_ops nacc_detach_walk_ops = {
+		.pre_vma = nacc_detach_pre_vma,
+		.pte_entry = nacc_detach_pte_entry,
+		.walk_lock = PGWALK_WRLOCK,
+	};
+	struct nacc_leaf_detach_stats stats = { 0 };
+	unsigned long end;
+	int ret;
+
+	if (!mm)
+		return -EINVAL;
+
+	end = min_t(unsigned long, TASK_SIZE, NACC_USER_VPN2_PROTECTED_END);
+
+	ret = mmap_write_lock_killable(mm);
+	if (ret) {
+		printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages: mmap lock failed tag=%s mm=%px err=%d\n",
+		       tag, mm, ret);
+		return ret;
+	}
+
+	ret = walk_page_range(mm, 0, end, &nacc_detach_walk_ops, &stats);
+	mmap_write_unlock(mm);
+
+	if (!ret)
+		flush_tlb_mm(mm);
+
+	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu detached_ptes=%lu already_special=%lu non_user=%lu empty=%lu\n",
+	       tag, mm, ret, end, stats.vmas, stats.detached_ptes,
+	       stats.already_special_ptes, stats.non_user_ptes,
+	       stats.empty_ptes);
+
+	return ret;
+}
+EXPORT_SYMBOL(nacc_detach_user_leaf_pages);
 
 static const char *nacc_private_data_path_category_name(unsigned long category)
 {
