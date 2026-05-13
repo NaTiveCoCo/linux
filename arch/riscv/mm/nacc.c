@@ -16,11 +16,6 @@
 
 extern unsigned long nacc_mappings_virt;
 
-#define NACC_USER_VPN2_PROTECTED_SLOTS 256UL
-#define NACC_USER_VPN2_SLOT_SIZE       (1UL << 30)
-#define NACC_USER_VPN2_PROTECTED_END \
-	(NACC_USER_VPN2_PROTECTED_SLOTS * NACC_USER_VPN2_SLOT_SIZE)
-
 enum nacc_uaccess_tx_report_mode {
 	NACC_UACCESS_TX_REPORT_ALL = 0,
 	NACC_UACCESS_TX_REPORT_BULK = 1,

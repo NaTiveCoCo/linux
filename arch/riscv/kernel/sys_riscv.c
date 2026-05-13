@@ -599,6 +599,21 @@ void nacc_retire_root_sbi(unsigned long pgd_pa)
 	}
 }
 
+int nacc_retire_private_pfn_sbi(unsigned long pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RETIRE_PRIVATE_PFN,
+			pfn, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_retire_private_pfn_sbi failed: pfn=%lx err=%ld val=%ld\n",
+		       pfn, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return ret.value ? 1 : 0;
+}
+
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;

@@ -70,6 +70,11 @@ enum nacc_uaccess_tx_direction {
 #define NACC_PTP_PFN_BASE  0x1b0000
 #define NACC_PTP_PFN_END   0x1c0000
 
+#define NACC_USER_VPN2_PROTECTED_SLOTS 256UL
+#define NACC_USER_VPN2_SLOT_SIZE       (1UL << 30)
+#define NACC_USER_VPN2_PROTECTED_END \
+	(NACC_USER_VPN2_PROTECTED_SLOTS * NACC_USER_VPN2_SLOT_SIZE)
+
 enum nacc_update_pte_op {
 	NACC_UPDATE_PTE_XCHG_ONE = 1,
 	NACC_UPDATE_PTE_TEST_CLEAR_YOUNG_ONE = 2,
@@ -157,6 +162,7 @@ unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
 				  unsigned long flags);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
+int nacc_retire_private_pfn_sbi(unsigned long pfn);
 void nacc_private_data_syscall_enter(unsigned long syscall_nr,
 				     unsigned long path_category,
 				     const char *syscall_name);

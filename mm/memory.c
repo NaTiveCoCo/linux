@@ -202,7 +202,8 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 		token_pfn = page_to_pfn(token);
 		if (nacc_pfn_is_secure_ptp(token_pfn))
 			nacc_track_secure_ptp_pfn(token_pfn);
-		if (nacc_is_secure_ptp_virt(pmd) && nacc_use_secure_pt(tlb->mm))
+		if (nacc_pfn_is_secure_ptp(virt_to_pfn(pmd)) &&
+		    nacc_use_secure_pt(tlb->mm))
 			nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
 					    __pa(pmd), 0, addr,
 					    __pa(tlb->mm->pgd), 0);
@@ -1611,6 +1612,37 @@ static __always_inline void zap_present_folio_ptes(struct mmu_gather *tlb,
 	}
 }
 
+static bool nacc_addr_in_protected_user_leaf_range(unsigned long addr)
+{
+	unsigned long end;
+
+	end = min_t(unsigned long, TASK_SIZE, NACC_USER_VPN2_PROTECTED_END);
+	return addr < end;
+}
+
+static struct page *nacc_special_private_page(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr, pte_t ptent,
+		unsigned long *pfn_out)
+{
+	unsigned long pfn;
+
+	if (!nacc_mm_is_active(mm))
+		return NULL;
+	if (!(vma->vm_flags & VM_MIXEDMAP) || (vma->vm_flags & VM_PFNMAP))
+		return NULL;
+	if (!nacc_addr_in_protected_user_leaf_range(addr))
+		return NULL;
+	if (!pte_present(ptent) || !pte_user(ptent) || !pte_special(ptent))
+		return NULL;
+
+	pfn = pte_pfn(ptent);
+	if (!pfn_valid(pfn) || is_zero_pfn(pfn) || nacc_pfn_is_secure_ptp(pfn))
+		return NULL;
+
+	*pfn_out = pfn;
+	return pfn_to_page(pfn);
+}
+
 /*
  * Zap or skip at least one present PTE, trying to batch-process subsequent
  * PTEs that map consecutive pages of the same folio.
@@ -1632,10 +1664,37 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 	struct mm_struct *mm = tlb->mm;
 	struct folio *folio;
 	struct page *page;
+	unsigned long nacc_pfn;
 	int nr;
 
 	page = vm_normal_page(vma, addr, ptent);
 	if (!page) {
+		page = nacc_special_private_page(mm, vma, addr, ptent,
+						 &nacc_pfn);
+		if (page) {
+			int retire_ret;
+
+			folio = page_folio(page);
+			if (unlikely(!should_zap_folio(details, folio)))
+				return 1;
+			/*
+			 * The Monitor tag is PFN-wide, while fork children can
+			 * hold separate RSS-counted mappings to the same PFN.
+			 */
+			retire_ret = nacc_retire_private_pfn_sbi(nacc_pfn);
+			if (retire_ret >= 0) {
+				if (!retire_ret)
+					printk_ratelimited(KERN_ERR
+							   "[Linux]: NaCC private special PFN tag already clear: pfn=%lx addr=%lx mm=%px\n",
+							   nacc_pfn, addr, mm);
+				zap_present_folio_ptes(tlb, vma, folio, page,
+						       pte, ptent, 1, addr,
+						       details, rss,
+						       force_flush,
+						       force_break);
+				return 1;
+			}
+		}
 		/* We don't need up-to-date accessed/dirty bits. */
 		ptep_get_and_clear_full(mm, addr, pte, tlb->fullmm);
 		arch_check_zapped_pte(vma, ptent);
