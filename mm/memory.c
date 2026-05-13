@@ -552,6 +552,10 @@ static inline void add_mm_rss_vec(struct mm_struct *mm, int *rss)
 			add_mm_counter(mm, i, rss[i]);
 }
 
+static struct page *nacc_special_private_page(struct mm_struct *mm,
+		struct vm_area_struct *vma, unsigned long addr, pte_t ptent,
+		unsigned long *pfn_out);
+
 /*
  * This function is called to print an error when a bad pte
  * is found. For example, we might have a PFN-mapped pte in
@@ -1062,11 +1066,20 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	struct folio *folio;
 	bool any_writable;
 	fpb_t flags = 0;
+	bool nacc_special = false;
 	int err, nr;
 
 	page = vm_normal_page(src_vma, addr, pte);
-	if (unlikely(!page))
-		goto copy_pte;
+	if (unlikely(!page)) {
+		unsigned long nacc_pfn;
+
+		/* NaCC detached leaves are special PTEs but still Linux-accounted. */
+		page = nacc_special_private_page(src_vma->vm_mm, src_vma,
+						 addr, pte, &nacc_pfn);
+		if (!page)
+			goto copy_pte;
+		nacc_special = true;
+	}
 
 	folio = page_folio(page);
 
@@ -1075,7 +1088,8 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	 * sure that the common "small folio" case is as fast as possible
 	 * by keeping the batching logic separate.
 	 */
-	if (unlikely(!*prealloc && folio_test_large(folio) && max_nr != 1)) {
+	if (unlikely(!nacc_special && !*prealloc &&
+		     folio_test_large(folio) && max_nr != 1)) {
 		if (src_vma->vm_flags & VM_SHARED)
 			flags |= FPB_IGNORE_DIRTY;
 		if (!vma_soft_dirty_enabled(src_vma))
@@ -3559,11 +3573,16 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	struct mmu_notifier_range range;
 	vm_fault_t ret;
 	bool pfn_is_zero;
+	unsigned long nacc_special_pfn = 0;
+	bool nacc_special_old;
 
 	delayacct_wpcopy_start();
 
 	if (vmf->page)
 		old_folio = page_folio(vmf->page);
+	nacc_special_old = !!nacc_special_private_page(mm, vma, vmf->address,
+						       vmf->orig_pte,
+						       &nacc_special_pfn);
 	ret = vmf_anon_prepare(vmf);
 	if (unlikely(ret))
 		goto out;
@@ -3635,6 +3654,16 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 * that left a window where the new PTE could be loaded into
 		 * some TLBs while the old PTE remains in others.
 		 */
+		if (nacc_special_old) {
+			int retire_ret;
+
+			retire_ret = nacc_retire_private_pfn_sbi(nacc_special_pfn);
+			if (!retire_ret)
+				printk_ratelimited(KERN_ERR
+						   "[Linux]: NaCC COW old private PFN tag already clear: pfn=%lx addr=%lx mm=%px\n",
+						   nacc_special_pfn,
+						   vmf->address, mm);
+		}
 		ptep_clear_flush(vma, vmf->address, vmf->pte);
 		folio_add_new_anon_rmap(new_folio, vma, vmf->address, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(new_folio, vma);
@@ -3911,6 +3940,15 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	}
 
 	vmf->page = vm_normal_page(vma, vmf->address, vmf->orig_pte);
+	if (!vmf->page) {
+		unsigned long nacc_pfn;
+
+		/* Let COW replacement drop the old detached leaf's RSS/rmap/ref. */
+		vmf->page = nacc_special_private_page(vma->vm_mm, vma,
+						      vmf->address,
+						      vmf->orig_pte,
+						      &nacc_pfn);
+	}
 
 	if (vmf->page)
 		folio = page_folio(vmf->page);
