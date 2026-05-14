@@ -1066,6 +1066,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	struct folio *folio;
 	bool any_writable;
 	fpb_t flags = 0;
+	unsigned long nacc_special_pfn = 0;
 	bool nacc_special = false;
 	int err, nr;
 
@@ -1078,6 +1079,7 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 						 addr, pte, &nacc_pfn);
 		if (!page)
 			goto copy_pte;
+		nacc_special_pfn = nacc_pfn;
 		nacc_special = true;
 	}
 
@@ -1140,6 +1142,18 @@ copy_present_ptes(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	}
 
 copy_pte:
+	if (unlikely(nacc_special)) {
+		err = nacc_acquire_private_pfn_sbi(nacc_special_pfn);
+		if (err < 0) {
+			if (folio_test_anon(folio))
+				rss[MM_ANONPAGES]--;
+			else
+				rss[mm_counter_file(folio)]--;
+			folio_remove_rmap_pte(folio, page, src_vma);
+			folio_put(folio);
+			return -EIO;
+		}
+	}
 	__copy_present_ptes(dst_vma, src_vma, dst_pte, src_pte, pte, addr, 1);
 	return 1;
 }
@@ -1634,6 +1648,23 @@ static bool nacc_addr_in_protected_user_leaf_range(unsigned long addr)
 	return addr < end;
 }
 
+static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
+					     unsigned long addr)
+{
+	if (!vma || !vma->vm_mm)
+		return false;
+	if (!nacc_mm_is_active(vma->vm_mm))
+		return false;
+	if (!nacc_addr_in_protected_user_leaf_range(addr))
+		return false;
+	if (!(vma->vm_flags & VM_MIXEDMAP) || (vma->vm_flags & VM_PFNMAP))
+		return false;
+	if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE))
+		return false;
+
+	return true;
+}
+
 static struct page *nacc_special_private_page(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long addr, pte_t ptent,
 		unsigned long *pfn_out)
@@ -1686,7 +1717,7 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 		page = nacc_special_private_page(mm, vma, addr, ptent,
 						 &nacc_pfn);
 		if (page) {
-			int retire_ret;
+			int release_ret;
 
 			folio = page_folio(page);
 			if (unlikely(!should_zap_folio(details, folio)))
@@ -1695,19 +1726,16 @@ static inline int zap_present_ptes(struct mmu_gather *tlb,
 			 * The Monitor tag is PFN-wide, while fork children can
 			 * hold separate RSS-counted mappings to the same PFN.
 			 */
-			retire_ret = nacc_retire_private_pfn_sbi(nacc_pfn);
-			if (retire_ret >= 0) {
-				if (!retire_ret)
-					printk_ratelimited(KERN_ERR
-							   "[Linux]: NaCC private special PFN tag already clear: pfn=%lx addr=%lx mm=%px\n",
-							   nacc_pfn, addr, mm);
-				zap_present_folio_ptes(tlb, vma, folio, page,
-						       pte, ptent, 1, addr,
-						       details, rss,
-						       force_flush,
-						       force_break);
-				return 1;
-			}
+			zap_present_folio_ptes(tlb, vma, folio, page,
+					       pte, ptent, 1, addr,
+					       details, rss, force_flush,
+					       force_break);
+			release_ret = nacc_release_private_pfn_sbi(nacc_pfn);
+			if (release_ret < 0)
+				printk_ratelimited(KERN_ERR
+						   "[Linux]: NaCC private special PFN release failed: pfn=%lx addr=%lx mm=%px\n",
+						   nacc_pfn, addr, mm);
+			return 1;
 		}
 		/* We don't need up-to-date accessed/dirty bits. */
 		ptep_get_and_clear_full(mm, addr, pte, tlb->fullmm);
@@ -3574,6 +3602,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	vm_fault_t ret;
 	bool pfn_is_zero;
 	unsigned long nacc_special_pfn = 0;
+	bool nacc_new_private;
 	bool nacc_special_old;
 
 	delayacct_wpcopy_start();
@@ -3583,6 +3612,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	nacc_special_old = !!nacc_special_private_page(mm, vma, vmf->address,
 						       vmf->orig_pte,
 						       &nacc_special_pfn);
+	nacc_new_private = nacc_should_install_private_leaf(vma, vmf->address);
 	ret = vmf_anon_prepare(vmf);
 	if (unlikely(ret))
 		goto out;
@@ -3626,16 +3656,6 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	 */
 	vmf->pte = pte_offset_map_lock(mm, vmf->pmd, vmf->address, &vmf->ptl);
 	if (likely(vmf->pte && pte_same(ptep_get(vmf->pte), vmf->orig_pte))) {
-		if (old_folio) {
-			if (!folio_test_anon(old_folio)) {
-				dec_mm_counter(mm, mm_counter_file(old_folio));
-				inc_mm_counter(mm, MM_ANONPAGES);
-			}
-		} else {
-			ksm_might_unmap_zero_page(mm, vmf->orig_pte);
-			inc_mm_counter(mm, MM_ANONPAGES);
-		}
-		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
 		entry = mk_pte(&new_folio->page, vma->vm_page_prot);
 		entry = pte_sw_mkyoung(entry);
 		if (unlikely(unshare)) {
@@ -3647,6 +3667,26 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		}
 
+		if (unlikely(nacc_new_private)) {
+			if (nacc_acquire_private_pfn_sbi(folio_pfn(new_folio)) < 0) {
+				ret = VM_FAULT_SIGBUS;
+				pte_unmap_unlock(vmf->pte, vmf->ptl);
+				goto pte_unlock_done;
+			}
+			entry = pte_mkspecial(entry);
+		}
+
+		if (old_folio) {
+			if (!folio_test_anon(old_folio)) {
+				dec_mm_counter(mm, mm_counter_file(old_folio));
+				inc_mm_counter(mm, MM_ANONPAGES);
+			}
+		} else {
+			ksm_might_unmap_zero_page(mm, vmf->orig_pte);
+			inc_mm_counter(mm, MM_ANONPAGES);
+		}
+		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
+
 		/*
 		 * Clear the pte entry and flush it first, before updating the
 		 * pte with the new entry, to keep TLBs on different CPUs in
@@ -3654,17 +3694,17 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		 * that left a window where the new PTE could be loaded into
 		 * some TLBs while the old PTE remains in others.
 		 */
+		ptep_clear_flush(vma, vmf->address, vmf->pte);
 		if (nacc_special_old) {
-			int retire_ret;
+			int release_ret;
 
-			retire_ret = nacc_retire_private_pfn_sbi(nacc_special_pfn);
-			if (!retire_ret)
+			release_ret = nacc_release_private_pfn_sbi(nacc_special_pfn);
+			if (release_ret < 0)
 				printk_ratelimited(KERN_ERR
-						   "[Linux]: NaCC COW old private PFN tag already clear: pfn=%lx addr=%lx mm=%px\n",
+						   "[Linux]: NaCC COW old private PFN release failed: pfn=%lx addr=%lx mm=%px\n",
 						   nacc_special_pfn,
 						   vmf->address, mm);
 		}
-		ptep_clear_flush(vma, vmf->address, vmf->pte);
 		folio_add_new_anon_rmap(new_folio, vma, vmf->address, RMAP_EXCLUSIVE);
 		folio_add_lru_vma(new_folio, vma);
 		BUG_ON(unshare && pte_write(entry));
@@ -3705,6 +3745,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 	}
 
+pte_unlock_done:
 	mmu_notifier_invalidate_range_end(&range);
 
 	if (new_folio)
@@ -4379,6 +4420,10 @@ static struct folio *alloc_swap_folio(struct vm_fault *vmf)
 	if (unlikely(userfaultfd_armed(vma)))
 		goto fallback;
 
+	if (unlikely(nacc_mm_is_active(vma->vm_mm) &&
+		     nacc_addr_in_protected_user_leaf_range(vmf->address)))
+		goto fallback;
+
 	/*
 	 * A large swapped out folio could be partially or fully in zswap. We
 	 * lack handling for such cases, so fallback to swapping in order-0
@@ -4925,6 +4970,10 @@ static struct folio *alloc_anon_folio(struct vm_fault *vmf)
 	if (unlikely(userfaultfd_armed(vma)))
 		goto fallback;
 
+	if (unlikely(nacc_mm_is_active(vma->vm_mm) &&
+		     nacc_addr_in_protected_user_leaf_range(vmf->address)))
+		goto fallback;
+
 	/*
 	 * Get a list of all the (large) orders below PMD_ORDER that are enabled
 	 * for this vma. Then filter out the orders that can't be allocated over
@@ -4996,11 +5045,14 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	struct folio *folio;
 	vm_fault_t ret = 0;
 	int nr_pages = 1;
+	bool nacc_private_leaf;
 	pte_t entry;
 
 	/* File mapping without ->vm_ops ? */
 	if (vma->vm_flags & VM_SHARED)
 		return VM_FAULT_SIGBUS;
+
+	nacc_private_leaf = nacc_should_install_private_leaf(vma, addr);
 
 	/*
 	 * Use pte_alloc() instead of pte_alloc_map(), so that OOM can
@@ -5079,6 +5131,18 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 		folio_put(folio);
 		return handle_userfault(vmf, VM_UFFD_MISSING);
+	}
+
+	if (unlikely(nacc_private_leaf)) {
+		if (WARN_ON_ONCE(nr_pages != 1)) {
+			ret = VM_FAULT_SIGBUS;
+			goto release;
+		}
+		if (nacc_acquire_private_pfn_sbi(folio_pfn(folio)) < 0) {
+			ret = VM_FAULT_SIGBUS;
+			goto release;
+		}
+		entry = pte_mkspecial(entry);
 	}
 
 	folio_ref_add(folio, nr_pages - 1);

@@ -162,6 +162,8 @@ unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
 				  unsigned long flags);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
+int nacc_acquire_private_pfn_sbi(unsigned long pfn);
+int nacc_release_private_pfn_sbi(unsigned long pfn);
 int nacc_retire_private_pfn_sbi(unsigned long pfn);
 void nacc_private_data_syscall_enter(unsigned long syscall_nr,
 				     unsigned long path_category,

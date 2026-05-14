@@ -64,6 +64,26 @@
 #define arch_mmap_check(addr, len, flags)	(0)
 #endif
 
+static bool nacc_should_mark_private_anon_vma(struct mm_struct *mm,
+		struct file *file, vm_flags_t vm_flags, unsigned long start,
+		unsigned long end)
+{
+	unsigned long protected_end;
+
+	if (!mm || !nacc_mm_is_active(mm))
+		return false;
+	if (file)
+		return false;
+	if (vm_flags & (VM_SHARED | VM_MAYSHARE | VM_PFNMAP))
+		return false;
+	if (end <= start)
+		return false;
+
+	protected_end = min_t(unsigned long, TASK_SIZE,
+			      NACC_USER_VPN2_PROTECTED_END);
+	return start < protected_end;
+}
+
 #if defined(NACC) && defined(NACC_PROFILE)
 static inline bool nacc_trace_mmap_syscall(struct mm_struct *mm)
 {
@@ -1529,6 +1549,10 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	unsigned long end = addr + len;
 	int error;
 	VMA_ITERATOR(vmi, mm, addr);
+
+	if (nacc_should_mark_private_anon_vma(mm, file, vm_flags, addr, end))
+		vm_flags |= VM_MIXEDMAP;
+
 	VMG_STATE(vmg, mm, &vmi, addr, end, vm_flags, pgoff);
 
 	vmg.file = file;
@@ -1955,6 +1979,9 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	 * Note: This happens *after* clearing old mappings in some code paths.
 	 */
 	flags |= VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
+	if (nacc_should_mark_private_anon_vma(mm, NULL, flags, addr, addr + len))
+		flags |= VM_MIXEDMAP;
+
 	if (!may_expand_vm(mm, flags, len >> PAGE_SHIFT))
 		return -ENOMEM;
 
