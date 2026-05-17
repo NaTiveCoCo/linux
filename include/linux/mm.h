@@ -433,6 +433,13 @@ extern unsigned int kobjsize(const void *objp);
 #endif
 
 #ifdef CONFIG_64BIT
+#define VM_NACC_APP_BIT		41
+#define VM_NACC_APP		BIT(VM_NACC_APP_BIT)	/* NaCC app VMA bookkeeping */
+#else
+#define VM_NACC_APP		VM_NONE
+#endif
+
+#ifdef CONFIG_64BIT
 /* VM is sealed, in vm_flags */
 #define VM_SEALED	_BITUL(63)
 #endif

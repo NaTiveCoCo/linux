@@ -74,7 +74,7 @@ static bool nacc_should_mark_private_anon_vma(struct mm_struct *mm,
 		return false;
 	if (file)
 		return false;
-	if (vm_flags & (VM_SHARED | VM_MAYSHARE | VM_PFNMAP))
+	if (vm_flags & (VM_SHARED | VM_MAYSHARE | VM_PFNMAP | VM_MIXEDMAP))
 		return false;
 	if (end <= start)
 		return false;
@@ -1551,7 +1551,7 @@ static unsigned long __mmap_region(struct file *file, unsigned long addr,
 	VMA_ITERATOR(vmi, mm, addr);
 
 	if (nacc_should_mark_private_anon_vma(mm, file, vm_flags, addr, end))
-		vm_flags |= VM_MIXEDMAP;
+		vm_flags |= VM_NACC_APP;
 
 	VMG_STATE(vmg, mm, &vmi, addr, end, vm_flags, pgoff);
 
@@ -1980,7 +1980,7 @@ static int do_brk_flags(struct vma_iterator *vmi, struct vm_area_struct *vma,
 	 */
 	flags |= VM_DATA_DEFAULT_FLAGS | VM_ACCOUNT | mm->def_flags;
 	if (nacc_should_mark_private_anon_vma(mm, NULL, flags, addr, addr + len))
-		flags |= VM_MIXEDMAP;
+		flags |= VM_NACC_APP;
 
 	if (!may_expand_vm(mm, flags, len >> PAGE_SHIFT))
 		return -ENOMEM;

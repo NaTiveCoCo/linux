@@ -122,8 +122,8 @@ EXPORT_SYMBOL(nacc_mm_is_active);
 
 struct nacc_leaf_detach_stats {
 	unsigned long vmas;
-	unsigned long detached_ptes;
-	unsigned long already_special_ptes;
+	unsigned long resident_ptes;
+	unsigned long already_nacc_ptes;
 	unsigned long non_user_ptes;
 	unsigned long empty_ptes;
 };
@@ -134,7 +134,7 @@ static int nacc_detach_pre_vma(unsigned long start, unsigned long end,
 	struct nacc_leaf_detach_stats *stats = walk->private;
 
 	if (walk->vma) {
-		vm_flags_set(walk->vma, VM_MIXEDMAP);
+		vm_flags_set(walk->vma, VM_NACC_APP);
 		stats->vmas++;
 	}
 
@@ -145,9 +145,7 @@ static int nacc_detach_pte_entry(pte_t *ptep, unsigned long addr,
 				 unsigned long next, struct mm_walk *walk)
 {
 	struct nacc_leaf_detach_stats *stats = walk->private;
-	struct mm_struct *mm = walk->mm;
 	pte_t oldpte;
-	pte_t newpte;
 
 	oldpte = ptep_get(ptep);
 	if (!pte_present(oldpte)) {
@@ -160,18 +158,10 @@ static int nacc_detach_pte_entry(pte_t *ptep, unsigned long addr,
 		return 0;
 	}
 
-	if (pte_special(oldpte)) {
-		stats->already_special_ptes++;
-		return 0;
-	}
-
-	newpte = pte_mkspecial(oldpte);
-	if (nacc_pfn_is_secure_ptp(virt_to_pfn(ptep)) && nacc_use_secure_pt(mm))
-		nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE, __pa(ptep),
-				    pte_val(newpte), addr, __pa(mm->pgd), 0);
+	if (pte_nacc(oldpte))
+		stats->already_nacc_ptes++;
 	else
-		set_pte(ptep, newpte);
-	stats->detached_ptes++;
+		stats->resident_ptes++;
 
 	return 0;
 }
@@ -205,9 +195,9 @@ int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag)
 	if (!ret)
 		flush_tlb_mm(mm);
 
-	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu detached_ptes=%lu already_special=%lu non_user=%lu empty=%lu\n",
-	       tag, mm, ret, end, stats.vmas, stats.detached_ptes,
-	       stats.already_special_ptes, stats.non_user_ptes,
+	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu resident_ptes=%lu already_nacc=%lu non_user=%lu empty=%lu\n",
+	       tag, mm, ret, end, stats.vmas, stats.resident_ptes,
+	       stats.already_nacc_ptes, stats.non_user_ptes,
 	       stats.empty_ptes);
 
 	return ret;
