@@ -122,11 +122,39 @@ EXPORT_SYMBOL(nacc_mm_is_active);
 
 struct nacc_leaf_detach_stats {
 	unsigned long vmas;
+	unsigned long private_hint_vmas;
 	unsigned long resident_ptes;
+	unsigned long resident_skipped_ptes;
 	unsigned long already_nacc_ptes;
+	unsigned long special_ptes;
 	unsigned long non_user_ptes;
 	unsigned long empty_ptes;
 };
+
+static bool nacc_vma_private_anon_hint(struct vm_area_struct *vma)
+{
+	if (!vma)
+		return false;
+	if (vma->vm_file)
+		return false;
+	if (vma->vm_flags & (VM_NACC | VM_IO | VM_PFNMAP | VM_MIXEDMAP))
+		return false;
+	if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE))
+		return false;
+
+	return vma_is_anonymous(vma);
+}
+
+static bool nacc_pte_is_linux_special_leaf(pte_t pte)
+{
+	if (pte_special(pte))
+		return true;
+#ifdef CONFIG_ARCH_HAS_PTE_DEVMAP
+	if (pte_devmap(pte))
+		return true;
+#endif
+	return false;
+}
 
 static int nacc_detach_pre_vma(unsigned long start, unsigned long end,
 			       struct mm_walk *walk)
@@ -134,8 +162,11 @@ static int nacc_detach_pre_vma(unsigned long start, unsigned long end,
 	struct nacc_leaf_detach_stats *stats = walk->private;
 
 	if (walk->vma) {
-		vm_flags_set(walk->vma, VM_NACC_APP);
 		stats->vmas++;
+		if (nacc_vma_private_anon_hint(walk->vma)) {
+			vm_flags_set(walk->vma, VM_NACC_APP);
+			stats->private_hint_vmas++;
+		}
 	}
 
 	return 0;
@@ -160,8 +191,16 @@ static int nacc_detach_pte_entry(pte_t *ptep, unsigned long addr,
 
 	if (pte_nacc(oldpte))
 		stats->already_nacc_ptes++;
-	else
+	else if (!nacc_vma_private_anon_hint(walk->vma))
+		stats->resident_skipped_ptes++;
+	else if (nacc_pte_is_linux_special_leaf(oldpte))
+		stats->special_ptes++;
+	else {
+		nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE, __pa(ptep),
+				    pte_val(pte_mknacc(oldpte)), addr,
+				    __pa(walk->mm->pgd), 0);
 		stats->resident_ptes++;
+	}
 
 	return 0;
 }
@@ -195,10 +234,11 @@ int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag)
 	if (!ret)
 		flush_tlb_mm(mm);
 
-	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu resident_ptes=%lu already_nacc=%lu non_user=%lu empty=%lu\n",
-	       tag, mm, ret, end, stats.vmas, stats.resident_ptes,
-	       stats.already_nacc_ptes, stats.non_user_ptes,
-	       stats.empty_ptes);
+	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu private_hint_vmas=%lu tagged_resident_ptes=%lu resident_skipped=%lu already_nacc=%lu special=%lu non_user=%lu empty=%lu\n",
+	       tag, mm, ret, end, stats.vmas, stats.private_hint_vmas,
+	       stats.resident_ptes, stats.resident_skipped_ptes,
+	       stats.already_nacc_ptes, stats.special_ptes,
+	       stats.non_user_ptes, stats.empty_ptes);
 
 	return ret;
 }

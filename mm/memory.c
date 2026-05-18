@@ -664,6 +664,9 @@ struct page *vm_normal_page(struct vm_area_struct *vma, unsigned long addr,
 {
 	unsigned long pfn = pte_pfn(pte);
 
+	if (unlikely(nacc_private_leaf_page(vma->vm_mm, vma, addr, pte, NULL)))
+		return NULL;
+
 	if (IS_ENABLED(CONFIG_ARCH_HAS_PTE_SPECIAL)) {
 		if (likely(!pte_special(pte)))
 			goto check_pfn;
@@ -1011,6 +1014,8 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
 		/* Uffd-wp needs to be delivered to dest pte as well */
 		pte = pte_mkuffd_wp(pte);
+	if (unlikely(pte_nacc(ptep_get(src_pte))))
+		pte = pte_mknacc(pte);
 	set_pte_at(dst_vma->vm_mm, addr, dst_pte, pte);
 	return 0;
 }
@@ -1643,6 +1648,8 @@ static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
 	    (vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP)))
 		return false;
 	if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE))
+		return false;
+	if (vma->vm_file)
 		return false;
 
 	return true;
@@ -3576,6 +3583,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	struct mmu_notifier_range range;
 	vm_fault_t ret;
 	bool pfn_is_zero;
+	bool nacc_new_private;
 
 	delayacct_wpcopy_start();
 
@@ -3586,6 +3594,9 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		goto out;
 
 	pfn_is_zero = is_zero_pfn(pte_pfn(vmf->orig_pte));
+	nacc_new_private = nacc_should_install_private_leaf(vma, vmf->address) ||
+			   (pte_present(vmf->orig_pte) &&
+			    pte_nacc(vmf->orig_pte));
 	new_folio = folio_prealloc(mm, vma, vmf->address, pfn_is_zero);
 	if (!new_folio)
 		goto oom;
@@ -3634,6 +3645,8 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		} else {
 			entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 		}
+		if (unlikely(nacc_new_private))
+			entry = pte_mknacc(entry);
 
 		if (old_folio) {
 			if (!folio_test_anon(old_folio)) {
@@ -5085,6 +5098,8 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		ret = VM_FAULT_SIGBUS;
 		goto release;
 	}
+	if (unlikely(nacc_private_leaf))
+		entry = pte_mknacc(entry);
 
 	folio_ref_add(folio, nr_pages - 1);
 	add_mm_counter(vma->vm_mm, MM_ANONPAGES, nr_pages);

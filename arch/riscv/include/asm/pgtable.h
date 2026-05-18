@@ -427,6 +427,15 @@ static inline int pte_nacc(pte_t pte)
 #endif
 }
 
+static inline pte_t pte_mknacc(pte_t pte)
+{
+#ifdef CONFIG_64BIT
+	return __pte(pte_val(pte) | _PAGE_NACC);
+#else
+	return pte;
+#endif
+}
+
 #ifdef CONFIG_ARCH_HAS_PTE_DEVMAP
 static inline int pte_devmap(pte_t pte)
 {
