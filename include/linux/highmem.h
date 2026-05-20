@@ -13,6 +13,12 @@
 
 #include "highmem-internal.h"
 
+#ifdef CONFIG_RISCV
+bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
+				    unsigned long vaddr,
+				    struct vm_area_struct *vma);
+#endif
+
 /**
  * kmap - Map a page for long term usage
  * @page:	Pointer to the page to be mapped
@@ -344,6 +350,13 @@ static inline int copy_mc_user_highpage(struct page *to, struct page *from,
 	unsigned long ret;
 	char *vfrom, *vto;
 
+#ifdef CONFIG_RISCV
+	if (nacc_copy_mc_user_highpage_sbi(to, from, vaddr, vma)) {
+		kmsan_unpoison_memory(page_address(to), PAGE_SIZE);
+		return 0;
+	}
+#endif
+
 	vfrom = kmap_local_page(from);
 	vto = kmap_local_page(to);
 	ret = copy_mc_to_kernel(vto, vfrom, PAGE_SIZE);
@@ -380,6 +393,13 @@ static inline int copy_mc_highpage(struct page *to, struct page *from)
 static inline int copy_mc_user_highpage(struct page *to, struct page *from,
 					unsigned long vaddr, struct vm_area_struct *vma)
 {
+#ifdef CONFIG_RISCV
+	if (nacc_copy_mc_user_highpage_sbi(to, from, vaddr, vma)) {
+		kmsan_unpoison_memory(page_address(to), PAGE_SIZE);
+		return 0;
+	}
+#endif
+
 	copy_user_highpage(to, from, vaddr, vma);
 	return 0;
 }

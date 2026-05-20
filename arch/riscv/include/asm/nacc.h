@@ -7,6 +7,7 @@
 #define NACC_RECLAIM_LIST_SIZE 511
 
 struct mm_struct;
+struct page;
 struct ptdesc;
 struct vm_area_struct;
 
@@ -78,6 +79,11 @@ enum nacc_uaccess_tx_direction {
 enum nacc_update_pte_op {
 	NACC_UPDATE_PTE_XCHG_ONE = 1,
 	NACC_UPDATE_PTE_TEST_CLEAR_YOUNG_ONE = 2,
+};
+
+enum nacc_copy_user_highpage_result {
+	NACC_COPY_USER_HIGHPAGE_NOT_HANDLED = 0,
+	NACC_COPY_USER_HIGHPAGE_HANDLED = 1,
 };
 
 void add_to_reclaim_list(unsigned long pfn);
@@ -165,6 +171,9 @@ void nacc_retire_root_sbi(unsigned long pgd_pa);
 int nacc_acquire_private_pfn_sbi(unsigned long pfn);
 int nacc_release_private_pfn_sbi(unsigned long pfn);
 int nacc_retire_private_pfn_sbi(unsigned long pfn);
+bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
+				    unsigned long vaddr,
+				    struct vm_area_struct *vma);
 void nacc_private_data_syscall_enter(unsigned long syscall_nr,
 				     unsigned long path_category,
 				     const char *syscall_name);

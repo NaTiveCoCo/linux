@@ -3,6 +3,7 @@
 // #include <linux/kernel.h>
 #include <linux/atomic.h>
 #include <linux/init.h>
+#include <linux/panic.h>
 #include <linux/pagewalk.h>
 #include <linux/percpu.h>
 #include <linux/string.h>
@@ -119,6 +120,61 @@ bool nacc_mm_is_active(struct mm_struct *mm)
 	return !!(nacc_mm_state(mm) & NACC_MM_ACTIVE);
 }
 EXPORT_SYMBOL(nacc_mm_is_active);
+
+static const char *nacc_copy_user_highpage_result_name(long result)
+{
+	switch (result) {
+	case NACC_COPY_USER_HIGHPAGE_NOT_HANDLED:
+		return "not_handled";
+	case NACC_COPY_USER_HIGHPAGE_HANDLED:
+		return "handled";
+	default:
+		return "unknown";
+	}
+}
+
+bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
+				    unsigned long vaddr,
+				    struct vm_area_struct *vma)
+{
+	struct sbiret ret;
+	unsigned long from_pfn;
+	unsigned long to_pfn;
+	unsigned long root_pgd_pa;
+
+	if (!vma || !vma->vm_mm || !nacc_mm_is_active(vma->vm_mm))
+		return false;
+
+	from_pfn = page_to_pfn(from);
+	to_pfn = page_to_pfn(to);
+	root_pgd_pa = __pa(vma->vm_mm->pgd);
+
+	printk(KERN_ERR "[NACC][copy-user-highpage] linux enter mm=%px pid=%d vaddr=%lx root=%lx from_pfn=%lx to_pfn=%lx\n",
+	       vma->vm_mm, current->pid, vaddr, root_pgd_pa, from_pfn, to_pfn);
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_COPY_USER_HIGHPAGE,
+			from_pfn, to_pfn, vaddr, root_pgd_pa,
+			current->pid, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[NACC][copy-user-highpage] linux ecall failed vaddr=%lx from_pfn=%lx to_pfn=%lx err=%ld val=%ld\n",
+		       vaddr, from_pfn, to_pfn, ret.error, ret.value);
+		panic("NaCC copy_user_highpage ecall failed");
+	}
+
+	printk(KERN_ERR "[NACC][copy-user-highpage] linux result vaddr=%lx from_pfn=%lx to_pfn=%lx result=%s(%ld)\n",
+	       vaddr, from_pfn, to_pfn,
+	       nacc_copy_user_highpage_result_name(ret.value), ret.value);
+
+	switch (ret.value) {
+	case NACC_COPY_USER_HIGHPAGE_NOT_HANDLED:
+		return false;
+	case NACC_COPY_USER_HIGHPAGE_HANDLED:
+		return true;
+	default:
+		panic("NaCC copy_user_highpage ecall returned unknown result");
+	}
+}
+EXPORT_SYMBOL(nacc_copy_mc_user_highpage_sbi);
 
 struct nacc_leaf_detach_stats {
 	unsigned long vmas;
