@@ -2,6 +2,7 @@
 #include <linux/compiler.h>
 #include <linux/export.h>
 #include <linux/fault-inject-usercopy.h>
+#include <linux/instruction_pointer.h>
 #include <linux/kasan-checks.h>
 #include <linux/thread_info.h>
 #include <linux/uaccess.h>
@@ -124,7 +125,23 @@ long strncpy_from_user(char *dst, const char __user *src, long count)
 		long retval;
 
 		src = masked_user_access_begin(src);
+#ifdef NACC
+		if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
+					      NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					      (unsigned long)src, count,
+					      _RET_IP_)) {
+			user_read_access_end();
+			return -EFAULT;
+		}
+#endif
 		retval = do_strncpy_from_user(dst, src, count, count);
+#ifdef NACC
+		if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
+					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					    (unsigned long)src, count,
+					    retval))
+			retval = -EFAULT;
+#endif
 		user_read_access_end();
 		return retval;
 	}
@@ -145,7 +162,23 @@ long strncpy_from_user(char *dst, const char __user *src, long count)
 		kasan_check_write(dst, count);
 		check_object_size(dst, count, false);
 		if (user_read_access_begin(src, max)) {
+#ifdef NACC
+			if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
+						      NACC_UACCESS_SCOPE_DIR_FROM_USER,
+						      (unsigned long)src, max,
+						      _RET_IP_)) {
+				user_read_access_end();
+				return -EFAULT;
+			}
+#endif
 			retval = do_strncpy_from_user(dst, src, count, max);
+#ifdef NACC
+			if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
+						    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+						    (unsigned long)src, max,
+						    retval))
+				retval = -EFAULT;
+#endif
 			user_read_access_end();
 			return retval;
 		}

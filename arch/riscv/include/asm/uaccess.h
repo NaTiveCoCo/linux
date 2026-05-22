@@ -90,20 +90,67 @@ do {								\
 } while (0)
 #endif /* CONFIG_64BIT */
 
+#ifdef NACC
+#define __nacc_get_user_private_or_asm(insn, x, ptr, err)	\
+do {								\
+	unsigned long __nacc_value;				\
+	int __nacc_ret;					\
+								\
+	__nacc_ret = nacc_private_data_get_user_read(		\
+		(unsigned long)(ptr), sizeof(*(ptr)),		\
+		&__nacc_value);					\
+	if (__nacc_ret > 0)					\
+		(x) = (__force __typeof__(x))__nacc_value;	\
+	else if (__nacc_ret < 0) {				\
+		(err) = -EFAULT;				\
+		(x) = (__force __typeof__(x))0;			\
+	} else {						\
+		__get_user_asm(insn, (x), ptr, err);		\
+	}							\
+} while (0)
+
+#define __nacc_get_user_private_or_8(x, ptr, err)		\
+do {								\
+	unsigned long __nacc_value;				\
+	int __nacc_ret;					\
+								\
+	__nacc_ret = nacc_private_data_get_user_read(		\
+		(unsigned long)(ptr), sizeof(*(ptr)),		\
+		&__nacc_value);					\
+	if (__nacc_ret > 0)					\
+		(x) = (__force __typeof__(x))__nacc_value;	\
+	else if (__nacc_ret < 0) {				\
+		(err) = -EFAULT;				\
+		(x) = (__force __typeof__(x))0;			\
+	} else {						\
+		__get_user_8((x), ptr, err);			\
+	}							\
+} while (0)
+#else
+#define __nacc_get_user_private_or_asm(insn, x, ptr, err)	\
+	__get_user_asm(insn, (x), ptr, err)
+#define __nacc_get_user_private_or_8(x, ptr, err)		\
+	__get_user_8((x), ptr, err)
+#endif
+
 #define __get_user_nocheck(x, __gu_ptr, __gu_err)		\
 do {								\
 	switch (sizeof(*__gu_ptr)) {				\
 	case 1:							\
-		__get_user_asm("lb", (x), __gu_ptr, __gu_err);	\
+		__nacc_get_user_private_or_asm("lb", (x),	\
+					       __gu_ptr, __gu_err);	\
 		break;						\
 	case 2:							\
-		__get_user_asm("lh", (x), __gu_ptr, __gu_err);	\
+		__nacc_get_user_private_or_asm("lh", (x),	\
+					       __gu_ptr, __gu_err);	\
 		break;						\
 	case 4:							\
-		__get_user_asm("lw", (x), __gu_ptr, __gu_err);	\
+		__nacc_get_user_private_or_asm("lw", (x),	\
+					       __gu_ptr, __gu_err);	\
 		break;						\
 	case 8:							\
-		__get_user_8((x), __gu_ptr, __gu_err);	\
+		__nacc_get_user_private_or_8((x), __gu_ptr,	\
+					     __gu_err);		\
 		break;						\
 	default:						\
 		BUILD_BUG();					\

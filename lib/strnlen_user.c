@@ -1,11 +1,39 @@
 // SPDX-License-Identifier: GPL-2.0
 #include <linux/kernel.h>
 #include <linux/export.h>
+#include <linux/instruction_pointer.h>
 #include <linux/uaccess.h>
 #include <linux/mm.h>
 #include <linux/bitops.h>
 
 #include <asm/word-at-a-time.h>
+
+#ifdef NACC
+static __always_inline bool nacc_strnlen_user_scope_window(
+	const char __user *src, unsigned long max,
+	unsigned long *scope_va, unsigned long *scope_len)
+{
+	const unsigned long word_bytes = sizeof(unsigned long);
+	const unsigned long word_mask = word_bytes - 1;
+	unsigned long align = word_mask & (unsigned long)src;
+	unsigned long va = (unsigned long)src - align;
+	unsigned long bytes = max;
+
+	if (bytes > ~0UL - align)
+		return false;
+	bytes += align;
+	if (!bytes || bytes > ~0UL - word_mask)
+		return false;
+
+	bytes = (bytes + word_mask) & ~word_mask;
+	if (va > ~0UL - bytes)
+		return false;
+
+	*scope_va = va;
+	*scope_len = bytes;
+	return true;
+}
+#endif
 
 /*
  * Do a strnlen, return length of string *with* final '\0'.
@@ -98,9 +126,35 @@ long strnlen_user(const char __user *str, long count)
 
 	if (can_do_masked_user_access()) {
 		long retval;
+#ifdef NACC
+		unsigned long nacc_scope_va;
+		unsigned long nacc_scope_len;
+#endif
 
 		str = masked_user_access_begin(str);
+#ifdef NACC
+		if (!nacc_strnlen_user_scope_window(str, count,
+						    &nacc_scope_va,
+						    &nacc_scope_len)) {
+			user_read_access_end();
+			return 0;
+		}
+		if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
+					      NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					      nacc_scope_va, nacc_scope_len,
+					      _RET_IP_)) {
+			user_read_access_end();
+			return 0;
+		}
+#endif
 		retval = do_strnlen_user(str, count, count);
+#ifdef NACC
+		if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
+					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					    nacc_scope_va, nacc_scope_len,
+					    retval))
+			retval = 0;
+#endif
 		user_read_access_end();
 		return retval;
 	}
@@ -110,6 +164,10 @@ long strnlen_user(const char __user *str, long count)
 	if (likely(src_addr < max_addr)) {
 		unsigned long max = max_addr - src_addr;
 		long retval;
+#ifdef NACC
+		unsigned long nacc_scope_va;
+		unsigned long nacc_scope_len;
+#endif
 
 		/*
 		 * Truncate 'max' to the user-specified limit, so that
@@ -119,7 +177,31 @@ long strnlen_user(const char __user *str, long count)
 			max = count;
 
 		if (user_read_access_begin(str, max)) {
+#ifdef NACC
+			if (!nacc_strnlen_user_scope_window(str, max,
+							    &nacc_scope_va,
+							    &nacc_scope_len)) {
+				user_read_access_end();
+				return 0;
+			}
+			if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
+						      NACC_UACCESS_SCOPE_DIR_FROM_USER,
+						      nacc_scope_va,
+						      nacc_scope_len,
+						      _RET_IP_)) {
+				user_read_access_end();
+				return 0;
+			}
+#endif
 			retval = do_strnlen_user(str, count, max);
+#ifdef NACC
+			if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
+						    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+						    nacc_scope_va,
+						    nacc_scope_len,
+						    retval))
+				retval = 0;
+#endif
 			user_read_access_end();
 			return retval;
 		}

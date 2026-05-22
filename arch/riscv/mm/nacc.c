@@ -429,6 +429,137 @@ void nacc_private_data_uaccess_exit(void)
 }
 EXPORT_SYMBOL(nacc_private_data_uaccess_exit);
 
+static const char *nacc_uaccess_scope_class_name(enum nacc_uaccess_scope_class scope_class)
+{
+	switch (scope_class) {
+	case NACC_UACCESS_SCOPE_STRING_READ:
+		return "string_read";
+	case NACC_UACCESS_SCOPE_CLASS_UNKNOWN:
+	default:
+		return "unknown";
+	}
+}
+
+static const char *nacc_uaccess_scope_direction_name(enum nacc_uaccess_scope_direction direction)
+{
+	switch (direction) {
+	case NACC_UACCESS_SCOPE_DIR_FROM_USER:
+		return "from_user";
+	case NACC_UACCESS_SCOPE_DIR_TO_USER:
+		return "to_user";
+	case NACC_UACCESS_SCOPE_DIR_UNKNOWN:
+	default:
+		return "unknown";
+	}
+}
+
+bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
+			      enum nacc_uaccess_scope_direction direction,
+			      unsigned long user_va,
+			      unsigned long bytes,
+			      unsigned long caller_pc)
+{
+	struct sbiret ret;
+
+	if (!current->mm || !current->mm->pgd)
+		return true;
+	if (!current->thread.nacc_cid)
+		return true;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return true;
+	if (!bytes)
+		return false;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UACCESS_SCOPE_BEGIN,
+			scope_class, direction, user_va, bytes, caller_pc,
+			current->pid);
+	if (ret.error) {
+		printk_ratelimited(KERN_ERR "[NACC][uaccess-scope-begin-failed] pid=%d comm=%s cid=%lx class=%s direction=%s user_va=%lx bytes=%lu caller=%lx err=%ld val=%ld\n",
+				   current->pid, current->comm,
+				   current->thread.nacc_cid,
+				   nacc_uaccess_scope_class_name(scope_class),
+				   nacc_uaccess_scope_direction_name(direction),
+				   user_va, bytes, caller_pc, ret.error,
+				   ret.value);
+		return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(nacc_uaccess_scope_begin);
+
+bool nacc_uaccess_scope_end(enum nacc_uaccess_scope_class scope_class,
+			    enum nacc_uaccess_scope_direction direction,
+			    unsigned long user_va,
+			    unsigned long bytes,
+			    long result)
+{
+	struct sbiret ret;
+
+	if (!current->mm || !current->mm->pgd)
+		return true;
+	if (!current->thread.nacc_cid)
+		return true;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return true;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UACCESS_SCOPE_END,
+			scope_class, direction, user_va, bytes,
+			(unsigned long)result, current->pid);
+	if (ret.error) {
+		printk_ratelimited(KERN_ERR "[NACC][uaccess-scope-end-failed] pid=%d comm=%s cid=%lx class=%s direction=%s user_va=%lx bytes=%lu result=%ld err=%ld val=%ld\n",
+				   current->pid, current->comm,
+				   current->thread.nacc_cid,
+				   nacc_uaccess_scope_class_name(scope_class),
+				   nacc_uaccess_scope_direction_name(direction),
+				   user_va, bytes, result, ret.error,
+				   ret.value);
+		return false;
+	}
+
+	return true;
+}
+EXPORT_SYMBOL(nacc_uaccess_scope_end);
+
+int nacc_private_data_get_user_read(unsigned long user_va,
+				    unsigned long bytes,
+				    unsigned long *value)
+{
+	struct sbiret ret;
+
+	if (value)
+		*value = 0;
+
+	if (!current->mm || !current->mm->pgd)
+		return 0;
+	if (!current->thread.nacc_cid)
+		return 0;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return 0;
+	if (!value)
+		return -EFAULT;
+	if ((bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8) ||
+	    bytes > sizeof(unsigned long))
+		return 0;
+
+	ret = sbi_ecall(SBI_EXT_NACC,
+			SBI_EXT_NACC_UACCESS_PRIVATE_GET_USER_READ,
+			user_va, bytes, 0, 0, 0, 0);
+	if (!ret.error) {
+		*value = ret.value;
+		return 1;
+	}
+
+	if (ret.error == SBI_ERR_NOT_SUPPORTED)
+		return 0;
+
+	printk_ratelimited(KERN_ERR "[NACC][private-get-user-read-denied] pid=%d comm=%s cid=%lx user_va=%lx bytes=%lu err=%ld val=%ld\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   user_va, bytes, ret.error, ret.value);
+	return -EFAULT;
+}
+EXPORT_SYMBOL(nacc_private_data_get_user_read);
+
 static const char *nacc_uaccess_tx_api_kind_name(enum nacc_uaccess_tx_api_kind api_kind)
 {
 	switch (api_kind) {
