@@ -323,130 +323,11 @@ static const char * const syscall_names[] = {
 #undef __SYSCALL
 #undef __SYSCALL_WITH_COMPAT
 
-static unsigned long nacc_private_data_syscall_path_category(unsigned long nr)
-{
-	switch (nr) {
-#ifdef __NR_read
-	case __NR_read:
-#endif
-#ifdef __NR_readv
-	case __NR_readv:
-#endif
-#ifdef __NR_pread64
-	case __NR_pread64:
-#endif
-#ifdef __NR_recvfrom
-	case __NR_recvfrom:
-#endif
-#ifdef __NR_recvmsg
-	case __NR_recvmsg:
-#endif
-		return NACC_PD_PATH_USER_BUFFER_WRITE;
-#ifdef __NR_write
-	case __NR_write:
-#endif
-#ifdef __NR_writev
-	case __NR_writev:
-#endif
-#ifdef __NR_pwrite64
-	case __NR_pwrite64:
-#endif
-#ifdef __NR_sendto
-	case __NR_sendto:
-#endif
-#ifdef __NR_sendmsg
-	case __NR_sendmsg:
-#endif
-		return NACC_PD_PATH_USER_BUFFER_READ;
-#ifdef __NR_openat
-	case __NR_openat:
-#endif
-#ifdef __NR_openat2
-	case __NR_openat2:
-#endif
-#ifdef __NR_newfstatat
-	case __NR_newfstatat:
-#endif
-#ifdef __NR_faccessat
-	case __NR_faccessat:
-#endif
-#ifdef __NR_faccessat2
-	case __NR_faccessat2:
-#endif
-#ifdef __NR_readlinkat
-	case __NR_readlinkat:
-#endif
-#ifdef __NR_getdents64
-	case __NR_getdents64:
-#endif
-		return NACC_PD_PATH_FILE_PATH;
-#ifdef __NR_pipe2
-	case __NR_pipe2:
-#endif
-		return NACC_PD_PATH_PIPE;
-#ifdef __NR_clone
-	case __NR_clone:
-#endif
-#ifdef __NR_clone3
-	case __NR_clone3:
-#endif
-#ifdef __NR_execve
-	case __NR_execve:
-#endif
-#ifdef __NR_execveat
-	case __NR_execveat:
-#endif
-		return NACC_PD_PATH_FORK_EXEC;
-#ifdef __NR_mmap
-	case __NR_mmap:
-#endif
-#ifdef __NR_munmap
-	case __NR_munmap:
-#endif
-#ifdef __NR_mprotect
-	case __NR_mprotect:
-#endif
-#ifdef __NR_mremap
-	case __NR_mremap:
-#endif
-#ifdef __NR_brk
-	case __NR_brk:
-#endif
-		return NACC_PD_PATH_MAPPING_UPDATE;
-#ifdef __NR_exit
-	case __NR_exit:
-#endif
-#ifdef __NR_exit_group
-	case __NR_exit_group:
-#endif
-		return NACC_PD_PATH_EXIT_TEARDOWN;
-#ifdef __NR_shmget
-	case __NR_shmget:
-#endif
-#ifdef __NR_shmat
-	case __NR_shmat:
-#endif
-#ifdef __NR_shmdt
-	case __NR_shmdt:
-#endif
-#ifdef __NR_shmctl
-	case __NR_shmctl:
-#endif
-#ifdef __NR_memfd_create
-	case __NR_memfd_create:
-#endif
-		return NACC_PD_PATH_SHARED_MEMORY;
-	default:
-		return NACC_PD_PATH_UNKNOWN;
-	}
-}
-
 asmlinkage __visible __trap_section  __no_stack_protector
 void do_trap_ecall_u(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
 		const char *name = "unknown";
-		unsigned long path_category;
 
 		if (current->thread.nacc_flag & NACC_INITED) {
 			if (regs->a7 < ARRAY_SIZE(syscall_names))
@@ -457,7 +338,6 @@ void do_trap_ecall_u(struct pt_regs *regs)
 			       regs->a0, regs->a1, regs->a2, regs->a7, name);
 		}
 		long syscall = regs->a7;
-		path_category = nacc_private_data_syscall_path_category(syscall);
 
 		regs->epc += 4;
 		regs->orig_a0 = regs->a0;
@@ -466,14 +346,6 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		riscv_v_vstate_discard(regs);
 
 		syscall = syscall_enter_from_user_mode(regs, syscall);
-		if (syscall >= 0 && syscall < NR_syscalls) {
-			if ((unsigned long)syscall < ARRAY_SIZE(syscall_names))
-				name = syscall_names[syscall];
-			path_category =
-				nacc_private_data_syscall_path_category(syscall);
-			nacc_private_data_syscall_enter(syscall, path_category,
-							name);
-		}
 
 		add_random_kstack_offset();
 		
@@ -493,8 +365,6 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		choose_random_kstack_offset(get_random_u16());
 
 		syscall_exit_to_user_mode(regs);
-		if (syscall >= 0 && syscall < NR_syscalls)
-			nacc_private_data_syscall_exit(syscall, path_category);
 		if (current->thread.nacc_flag & NACC_INITED)
 			printk(KERN_ERR "[Linux]: 'do_trap_ecall_u' pid=%d comm=%s cid=%lx syscall_exit_to_user_mode epc: %lx\n",
 			       current->pid, current->comm, current->thread.nacc_cid,

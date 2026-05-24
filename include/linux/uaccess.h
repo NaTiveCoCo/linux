@@ -206,15 +206,6 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 {
 	unsigned long ret;
 
-#if defined(NACC) && defined(NACC_PROFILE) && defined(CONFIG_MMU)
-	u64 nacc_tx_id;
-	unsigned long nacc_caller;
-
-	nacc_caller = _RET_IP_;
-	nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_COPY_FROM_USER,
-					   NACC_UACCESS_TX_DIR_FROM_USER,
-					   nacc_caller, (unsigned long)from, n);
-#endif
 	if (!check_copy_size(to, n, false))
 		ret = n;
 	else {
@@ -224,11 +215,6 @@ copy_from_user(void *to, const void __user *from, unsigned long n)
 		ret = _copy_from_user(to, from, n);
 #endif
 	}
-#if defined(NACC) && defined(NACC_PROFILE) && defined(CONFIG_MMU)
-	nacc_uaccess_tx_end(nacc_tx_id, NACC_UACCESS_TX_COPY_FROM_USER,
-			    NACC_UACCESS_TX_DIR_FROM_USER,
-			    nacc_caller, (unsigned long)from, n, ret);
-#endif
 	return ret;
 }
 
@@ -237,15 +223,6 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	unsigned long ret;
 
-#if defined(NACC) && defined(NACC_PROFILE) && defined(CONFIG_MMU)
-	u64 nacc_tx_id;
-	unsigned long nacc_caller;
-
-	nacc_caller = _RET_IP_;
-	nacc_tx_id = nacc_uaccess_tx_begin(NACC_UACCESS_TX_COPY_TO_USER,
-					   NACC_UACCESS_TX_DIR_TO_USER,
-					   nacc_caller, (unsigned long)to, n);
-#endif
 	if (!check_copy_size(from, n, true))
 		ret = n;
 	else {
@@ -255,11 +232,6 @@ copy_to_user(void __user *to, const void *from, unsigned long n)
 		ret = _copy_to_user(to, from, n);
 #endif
 	}
-#if defined(NACC) && defined(NACC_PROFILE) && defined(CONFIG_MMU)
-	nacc_uaccess_tx_end(nacc_tx_id, NACC_UACCESS_TX_COPY_TO_USER,
-			    NACC_UACCESS_TX_DIR_TO_USER,
-			    nacc_caller, (unsigned long)to, n, ret);
-#endif
 	return ret;
 }
 

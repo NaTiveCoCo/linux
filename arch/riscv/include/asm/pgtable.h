@@ -660,11 +660,6 @@ static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 #else
 	pte_t pte = __pte(atomic_long_xchg((atomic_long_t *)ptep, 0));
 #endif
-#if defined(NACC) && defined(NACC_PROFILE)
-    if(current->thread.nacc_flag & NACC_INITED) {
-        printk(KERN_ERR "[ptep_get_and_clear]: address: %lx, pte: %lx\n", address, pte_val(pte));   
-    }
-#endif
 	page_table_check_pte_clear(mm, pte);
 
 	return pte;

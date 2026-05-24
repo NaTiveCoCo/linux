@@ -23,39 +23,6 @@ struct nacc_reclaim_list {
 #define NACC_MM_ACTIVE		0x1UL
 #define NACC_MM_ROOT_TAGGED	0x2UL
 
-enum nacc_private_data_path_category {
-	NACC_PD_PATH_UNKNOWN = 0,
-	NACC_PD_PATH_USER_BUFFER_READ = 1,
-	NACC_PD_PATH_USER_BUFFER_WRITE = 2,
-	NACC_PD_PATH_FILE_PATH = 3,
-	NACC_PD_PATH_PIPE = 4,
-	NACC_PD_PATH_FORK_EXEC = 5,
-	NACC_PD_PATH_MAPPING_UPDATE = 6,
-	NACC_PD_PATH_EXIT_TEARDOWN = 7,
-	NACC_PD_PATH_SHARED_MEMORY = 8,
-};
-
-enum nacc_private_data_uaccess_direction {
-	NACC_PD_UACCESS_UNKNOWN = 0,
-	NACC_PD_UACCESS_FROM_USER = 1,
-	NACC_PD_UACCESS_TO_USER = 2,
-};
-
-enum nacc_uaccess_tx_api_kind {
-	NACC_UACCESS_TX_COPY_FROM_USER = 1,
-	NACC_UACCESS_TX_COPY_TO_USER = 2,
-	NACC_UACCESS_TX_GET_USER = 3,
-	NACC_UACCESS_TX_PUT_USER = 4,
-	NACC_UACCESS_TX_CLEAR_USER = 5,
-};
-
-enum nacc_uaccess_tx_direction {
-	NACC_UACCESS_TX_DIR_UNKNOWN = 0,
-	NACC_UACCESS_TX_DIR_FROM_USER = 1,
-	NACC_UACCESS_TX_DIR_TO_USER = 2,
-	NACC_UACCESS_TX_DIR_ZERO_TO_USER = 3,
-};
-
 enum nacc_uaccess_scope_class {
 	NACC_UACCESS_SCOPE_CLASS_UNKNOWN = 0,
 	NACC_UACCESS_SCOPE_STRING_READ = 1,
@@ -185,28 +152,6 @@ int nacc_retire_private_pfn_sbi(unsigned long pfn);
 bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 				    unsigned long vaddr,
 				    struct vm_area_struct *vma);
-void nacc_private_data_syscall_enter(unsigned long syscall_nr,
-				     unsigned long path_category,
-				     const char *syscall_name);
-void nacc_private_data_syscall_exit(unsigned long syscall_nr,
-				    unsigned long path_category);
-void nacc_private_data_uaccess_enter(unsigned long direction,
-				     unsigned long caller_pc,
-				     unsigned long user_va,
-				     unsigned long bytes);
-void nacc_private_data_uaccess_exit(void);
-u64 nacc_uaccess_tx_begin(enum nacc_uaccess_tx_api_kind api_kind,
-			  enum nacc_uaccess_tx_direction direction,
-			  unsigned long caller_pc,
-			  unsigned long user_va,
-			  unsigned long bytes);
-void nacc_uaccess_tx_end(u64 tx_id,
-			 enum nacc_uaccess_tx_api_kind api_kind,
-			 enum nacc_uaccess_tx_direction direction,
-			 unsigned long caller_pc,
-			 unsigned long user_va,
-			 unsigned long bytes,
-			 long result);
 bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 			      enum nacc_uaccess_scope_direction direction,
 			      unsigned long user_va,

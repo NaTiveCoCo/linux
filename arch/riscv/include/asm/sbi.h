@@ -73,10 +73,7 @@ enum sbi_ext_nacc_fid {
     SBI_EXT_NACC_ATTACH_FORKED_CHILD = 0xb,
     SBI_EXT_NACC_RETIRE_ROOT = 0xc,
     SBI_EXT_NACC_TAG_ROOT = 0xd,
-    /* 0xe..0x10 reserved: obsolete region metadata ABI removed. */
-    SBI_EXT_NACC_PRIVATE_DATA_CONTEXT = 0x11,
-    SBI_EXT_NACC_PRIVATE_DATA_UACCESS_CONTEXT = 0x12,
-    SBI_EXT_NACC_PRIVATE_DATA_TX_CONTEXT = 0x13,
+    /* 0xe..0x13 reserved: obsolete metadata/profile context ABIs removed. */
     SBI_EXT_NACC_UPDATE_PTE = 0x14,
     SBI_EXT_NACC_UNREGISTER = 0x15,
     SBI_EXT_NACC_RETIRE_PRIVATE_PFN = 0x16,
