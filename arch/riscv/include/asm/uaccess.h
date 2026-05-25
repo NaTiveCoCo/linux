@@ -357,6 +357,22 @@ raw_copy_to_user(void __user *to, const void *from, unsigned long n)
 {
 	unsigned long ret;
 
+#ifdef NACC
+	if (n && nacc_private_data_uaccess_active()) {
+		int nacc_ret;
+
+		__enable_user_access();
+		nacc_ret = nacc_private_data_copy_to_user((unsigned long)to,
+							  (unsigned long)from,
+							  n, _RET_IP_, &ret);
+		__disable_user_access();
+		if (nacc_ret > 0)
+			return ret;
+		if (nacc_ret < 0)
+			return n;
+	}
+#endif
+
 	ret = __asm_copy_to_user(to, from, n);
 	return ret;
 }

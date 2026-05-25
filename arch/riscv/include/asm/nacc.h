@@ -85,6 +85,13 @@ static inline bool nacc_thread_has_root_l0_lifecycle(void)
 	       flag == NACC_EXEC || !!(flag & NACC_INITED);
 }
 
+static inline bool nacc_private_data_uaccess_active(void)
+{
+	return current->mm &&
+	       current->thread.nacc_cid &&
+	       (nacc_thread_is_inited() || nacc_mm_is_active(current->mm));
+}
+
 static inline bool nacc_use_secure_pt(struct mm_struct *mm)
 {
 	/*
@@ -165,6 +172,11 @@ bool nacc_uaccess_scope_end(enum nacc_uaccess_scope_class scope_class,
 int nacc_private_data_get_user_read(unsigned long user_va,
 				    unsigned long bytes,
 				    unsigned long *value);
+int nacc_private_data_copy_to_user(unsigned long user_va,
+				   unsigned long kernel_va,
+				   unsigned long bytes,
+				   unsigned long caller_pc,
+				   unsigned long *left);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
