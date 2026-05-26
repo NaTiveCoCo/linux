@@ -452,6 +452,40 @@ int nacc_private_data_get_user_read(unsigned long user_va,
 }
 EXPORT_SYMBOL(nacc_private_data_get_user_read);
 
+int nacc_private_data_put_user_write(unsigned long user_va,
+				     const void *value,
+				     unsigned long bytes)
+{
+	struct sbiret ret;
+	u64 raw = 0;
+
+	if (!current->mm || !current->mm->pgd)
+		return 0;
+	if (!nacc_private_data_uaccess_active())
+		return 0;
+	if (!value)
+		return -EFAULT;
+	if (bytes != 1 && bytes != 2 && bytes != 4 && bytes != 8)
+		return 0;
+
+	memcpy(&raw, value, bytes);
+	ret = sbi_ecall(SBI_EXT_NACC,
+			SBI_EXT_NACC_UACCESS_PRIVATE_PUT_USER_WRITE,
+			user_va, (unsigned long)raw,
+			(unsigned long)(raw >> 32), bytes, 0,
+			current->pid);
+	if (!ret.error)
+		return 1;
+	if (ret.error == SBI_ERR_NOT_SUPPORTED)
+		return 0;
+
+	printk_ratelimited(KERN_ERR "[NACC][private-put-user-write-denied] pid=%d comm=%s cid=%lx user_va=%lx bytes=%lu err=%ld val=%ld\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   user_va, bytes, ret.error, ret.value);
+	return -EFAULT;
+}
+EXPORT_SYMBOL(nacc_private_data_put_user_write);
+
 int nacc_private_data_copy_to_user(unsigned long user_va,
 				   unsigned long kernel_va,
 				   unsigned long bytes,

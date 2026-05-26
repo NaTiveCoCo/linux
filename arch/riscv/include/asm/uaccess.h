@@ -274,6 +274,23 @@ do {								\
 	}							\
 } while (0)
 
+#ifdef NACC
+#define __nacc_put_user_private_or_nocheck(x, ptr, err)		\
+do {									\
+	int __nacc_ret;							\
+									\
+	__nacc_ret = nacc_private_data_put_user_write(			\
+		(unsigned long)(ptr), &(x), sizeof(*(ptr)));		\
+	if (__nacc_ret < 0)						\
+		(err) = -EFAULT;					\
+	else if (!__nacc_ret)						\
+		__put_user_nocheck((x), ptr, err);			\
+} while (0)
+#else
+#define __nacc_put_user_private_or_nocheck(x, ptr, err)		\
+	__put_user_nocheck((x), ptr, err)
+#endif
+
 /**
  * __put_user: - Write a simple value into user space, with less checking.
  * @x:   Value to copy to user space.
@@ -304,7 +321,8 @@ do {								\
 	__chk_user_ptr(__gu_ptr);				\
 								\
 	__enable_user_access();					\
-	__put_user_nocheck(__val, __gu_ptr, __pu_err);		\
+	__nacc_put_user_private_or_nocheck(__val, __gu_ptr,	\
+					   __pu_err);		\
 	__disable_user_access();				\
 								\
 	__pu_err;						\

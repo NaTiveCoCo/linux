@@ -198,6 +198,9 @@ bool nacc_uaccess_scope_end(enum nacc_uaccess_scope_class scope_class,
 int nacc_private_data_get_user_read(unsigned long user_va,
 				    unsigned long bytes,
 				    unsigned long *value);
+int nacc_private_data_put_user_write(unsigned long user_va,
+				     const void *value,
+				     unsigned long bytes);
 int nacc_private_data_copy_to_user(unsigned long user_va,
 				   unsigned long kernel_va,
 				   unsigned long bytes,
