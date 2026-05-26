@@ -9,29 +9,28 @@
 #include <asm/word-at-a-time.h>
 
 #ifdef NACC
-static __always_inline bool nacc_strnlen_user_scope_window(
-	const char __user *src, unsigned long max,
-	unsigned long *scope_va, unsigned long *scope_len)
+static __always_inline long nacc_strnlen_user_staged_result(
+	const struct nacc_uaccess_string_read_desc *desc,
+	unsigned long count, unsigned long max)
 {
-	const unsigned long word_bytes = sizeof(unsigned long);
-	const unsigned long word_mask = word_bytes - 1;
-	unsigned long align = word_mask & (unsigned long)src;
-	unsigned long va = (unsigned long)src - align;
-	unsigned long bytes = max;
+	if (desc->nul_index != NACC_UACCESS_STRING_READ_NO_NUL)
+		return desc->nul_index + 1;
+	if (max >= count)
+		return count + 1;
+	return 0;
+}
 
-	if (bytes > ~0UL - align)
-		return false;
-	bytes += align;
-	if (!bytes || bytes > ~0UL - word_mask)
-		return false;
-
-	bytes = (bytes + word_mask) & ~word_mask;
-	if (va > ~0UL - bytes)
-		return false;
-
-	*scope_va = va;
-	*scope_len = bytes;
-	return true;
+static __always_inline void nacc_strnlen_user_init_desc(
+	struct nacc_uaccess_string_read_desc *desc, unsigned long count,
+	unsigned long caller_pc)
+{
+	*desc = (struct nacc_uaccess_string_read_desc) {
+		.version = NACC_UACCESS_STRING_READ_DESC_VERSION,
+		.op = NACC_UACCESS_STRING_READ_OP_MEASURE_CSTR,
+		.count = count,
+		.nul_index = NACC_UACCESS_STRING_READ_NO_NUL,
+		.caller_pc = caller_pc,
+	};
 }
 #endif
 
@@ -127,34 +126,32 @@ long strnlen_user(const char __user *str, long count)
 	if (can_do_masked_user_access()) {
 		long retval;
 #ifdef NACC
-		unsigned long nacc_scope_va;
-		unsigned long nacc_scope_len;
+		struct nacc_uaccess_string_read_desc nacc_desc;
+		int nacc_ret;
 #endif
 
 		str = masked_user_access_begin(str);
 #ifdef NACC
-		if (!nacc_strnlen_user_scope_window(str, count,
-						    &nacc_scope_va,
-						    &nacc_scope_len)) {
+		nacc_strnlen_user_init_desc(&nacc_desc, count, _RET_IP_);
+		nacc_ret = nacc_uaccess_string_read_begin((unsigned long)str,
+							  count, &nacc_desc);
+		if (nacc_ret > 0) {
+			retval = nacc_strnlen_user_staged_result(&nacc_desc,
+								 count, count);
+			if (!nacc_uaccess_scope_end(
+				    NACC_UACCESS_SCOPE_STRING_READ,
+				    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+				    (unsigned long)str, count, retval))
+				retval = 0;
 			user_read_access_end();
-			return 0;
+			return retval;
 		}
-		if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
-					      NACC_UACCESS_SCOPE_DIR_FROM_USER,
-					      nacc_scope_va, nacc_scope_len,
-					      _RET_IP_)) {
+		if (nacc_ret < 0) {
 			user_read_access_end();
 			return 0;
 		}
 #endif
 		retval = do_strnlen_user(str, count, count);
-#ifdef NACC
-		if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
-					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
-					    nacc_scope_va, nacc_scope_len,
-					    retval))
-			retval = 0;
-#endif
 		user_read_access_end();
 		return retval;
 	}
@@ -165,8 +162,8 @@ long strnlen_user(const char __user *str, long count)
 		unsigned long max = max_addr - src_addr;
 		long retval;
 #ifdef NACC
-		unsigned long nacc_scope_va;
-		unsigned long nacc_scope_len;
+		struct nacc_uaccess_string_read_desc nacc_desc;
+		int nacc_ret;
 #endif
 
 		/*
@@ -178,30 +175,27 @@ long strnlen_user(const char __user *str, long count)
 
 		if (user_read_access_begin(str, max)) {
 #ifdef NACC
-			if (!nacc_strnlen_user_scope_window(str, max,
-							    &nacc_scope_va,
-							    &nacc_scope_len)) {
+			nacc_strnlen_user_init_desc(&nacc_desc, count, _RET_IP_);
+			nacc_ret = nacc_uaccess_string_read_begin(
+				(unsigned long)str, max, &nacc_desc);
+			if (nacc_ret > 0) {
+				retval = nacc_strnlen_user_staged_result(
+					&nacc_desc, count, max);
+				if (!nacc_uaccess_scope_end(
+					    NACC_UACCESS_SCOPE_STRING_READ,
+					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					    (unsigned long)str, max,
+					    retval))
+					retval = 0;
 				user_read_access_end();
-				return 0;
+				return retval;
 			}
-			if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
-						      NACC_UACCESS_SCOPE_DIR_FROM_USER,
-						      nacc_scope_va,
-						      nacc_scope_len,
-						      _RET_IP_)) {
+			if (nacc_ret < 0) {
 				user_read_access_end();
 				return 0;
 			}
 #endif
 			retval = do_strnlen_user(str, count, max);
-#ifdef NACC
-			if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
-						    NACC_UACCESS_SCOPE_DIR_FROM_USER,
-						    nacc_scope_va,
-						    nacc_scope_len,
-						    retval))
-				retval = 0;
-#endif
 			user_read_access_end();
 			return retval;
 		}

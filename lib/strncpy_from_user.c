@@ -20,6 +20,34 @@
 	(((long) dst | (long) src) & (sizeof(long) - 1))
 #endif
 
+#ifdef NACC
+static __always_inline long nacc_strncpy_from_user_staged_result(
+	const struct nacc_uaccess_string_read_desc *desc,
+	unsigned long count, unsigned long max)
+{
+	if (desc->nul_index != NACC_UACCESS_STRING_READ_NO_NUL)
+		return desc->nul_index;
+	if (max >= count)
+		return count;
+	return -EFAULT;
+}
+
+static __always_inline void nacc_strncpy_from_user_init_desc(
+	struct nacc_uaccess_string_read_desc *desc, char *dst,
+	unsigned long count, unsigned long caller_pc)
+{
+	*desc = (struct nacc_uaccess_string_read_desc) {
+		.version = NACC_UACCESS_STRING_READ_DESC_VERSION,
+		.op = NACC_UACCESS_STRING_READ_OP_COPY_CSTR,
+		.buffer_va = (unsigned long)dst,
+		.buffer_bytes = count,
+		.count = count,
+		.nul_index = NACC_UACCESS_STRING_READ_NO_NUL,
+		.caller_pc = caller_pc,
+	};
+}
+#endif
+
 /*
  * Do a strncpy, return length of string without final '\0'.
  * 'count' is the user-supplied count (return 'count' if we
@@ -126,22 +154,33 @@ long strncpy_from_user(char *dst, const char __user *src, long count)
 
 		src = masked_user_access_begin(src);
 #ifdef NACC
-		if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
-					      NACC_UACCESS_SCOPE_DIR_FROM_USER,
-					      (unsigned long)src, count,
-					      _RET_IP_)) {
-			user_read_access_end();
-			return -EFAULT;
-		}
-#endif
-		retval = do_strncpy_from_user(dst, src, count, count);
-#ifdef NACC
-		if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
+		{
+			struct nacc_uaccess_string_read_desc nacc_desc;
+			int nacc_ret;
+
+			nacc_strncpy_from_user_init_desc(&nacc_desc, dst,
+							 count, _RET_IP_);
+			nacc_ret = nacc_uaccess_string_read_begin(
+				(unsigned long)src, count, &nacc_desc);
+			if (nacc_ret > 0) {
+				retval = nacc_strncpy_from_user_staged_result(
+					&nacc_desc, count, count);
+				if (!nacc_uaccess_scope_end(
+					    NACC_UACCESS_SCOPE_STRING_READ,
 					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
 					    (unsigned long)src, count,
 					    retval))
-			retval = -EFAULT;
+					retval = -EFAULT;
+				user_read_access_end();
+				return retval;
+			}
+			if (nacc_ret < 0) {
+				user_read_access_end();
+				return -EFAULT;
+			}
+		}
 #endif
+		retval = do_strncpy_from_user(dst, src, count, count);
 		user_read_access_end();
 		return retval;
 	}
@@ -163,22 +202,31 @@ long strncpy_from_user(char *dst, const char __user *src, long count)
 		check_object_size(dst, count, false);
 		if (user_read_access_begin(src, max)) {
 #ifdef NACC
-			if (!nacc_uaccess_scope_begin(NACC_UACCESS_SCOPE_STRING_READ,
-						      NACC_UACCESS_SCOPE_DIR_FROM_USER,
-						      (unsigned long)src, max,
-						      _RET_IP_)) {
+			struct nacc_uaccess_string_read_desc nacc_desc;
+			int nacc_ret;
+
+			nacc_strncpy_from_user_init_desc(&nacc_desc, dst,
+							 count, _RET_IP_);
+			nacc_ret = nacc_uaccess_string_read_begin(
+				(unsigned long)src, max, &nacc_desc);
+			if (nacc_ret > 0) {
+				retval = nacc_strncpy_from_user_staged_result(
+					&nacc_desc, count, max);
+				if (!nacc_uaccess_scope_end(
+					    NACC_UACCESS_SCOPE_STRING_READ,
+					    NACC_UACCESS_SCOPE_DIR_FROM_USER,
+					    (unsigned long)src, max,
+					    retval))
+					retval = -EFAULT;
+				user_read_access_end();
+				return retval;
+			}
+			if (nacc_ret < 0) {
 				user_read_access_end();
 				return -EFAULT;
 			}
 #endif
 			retval = do_strncpy_from_user(dst, src, count, max);
-#ifdef NACC
-			if (!nacc_uaccess_scope_end(NACC_UACCESS_SCOPE_STRING_READ,
-						    NACC_UACCESS_SCOPE_DIR_FROM_USER,
-						    (unsigned long)src, max,
-						    retval))
-				retval = -EFAULT;
-#endif
 			user_read_access_end();
 			return retval;
 		}

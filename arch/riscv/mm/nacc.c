@@ -13,6 +13,7 @@
 #include <asm/io.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
+#include <asm/csr.h>
 #include <asm/tlbflush.h>
 
 extern unsigned long nacc_mappings_virt;
@@ -286,6 +287,21 @@ static const char *nacc_uaccess_scope_direction_name(enum nacc_uaccess_scope_dir
 	}
 }
 
+static unsigned long nacc_user_access_save_enable(void)
+{
+	unsigned long status = csr_read(CSR_STATUS);
+
+	if (!(status & SR_SUM))
+		csr_set(CSR_STATUS, SR_SUM);
+	return status;
+}
+
+static void nacc_user_access_restore(unsigned long status)
+{
+	if (!(status & SR_SUM))
+		csr_clear(CSR_STATUS, SR_SUM);
+}
+
 bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 			      enum nacc_uaccess_scope_direction direction,
 			      unsigned long user_va,
@@ -293,6 +309,7 @@ bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 			      unsigned long caller_pc)
 {
 	struct sbiret ret;
+	unsigned long status;
 
 	if (!current->mm || !current->mm->pgd)
 		return true;
@@ -303,9 +320,11 @@ bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 	if (!bytes)
 		return false;
 
+	status = nacc_user_access_save_enable();
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UACCESS_SCOPE_BEGIN,
-			scope_class, direction, user_va, bytes, caller_pc,
+			scope_class, direction, user_va, bytes, 0,
 			current->pid);
+	nacc_user_access_restore(status);
 	if (ret.error) {
 		printk_ratelimited(KERN_ERR "[NACC][uaccess-scope-begin-failed] pid=%d comm=%s cid=%lx class=%s direction=%s user_va=%lx bytes=%lu caller=%lx err=%ld val=%ld\n",
 				   current->pid, current->comm,
@@ -320,6 +339,46 @@ bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 	return true;
 }
 EXPORT_SYMBOL(nacc_uaccess_scope_begin);
+
+int nacc_uaccess_string_read_begin(unsigned long user_va,
+				   unsigned long bytes,
+				   struct nacc_uaccess_string_read_desc *desc)
+{
+	struct sbiret ret;
+	unsigned long status;
+
+	if (!current->mm || !current->mm->pgd)
+		return 0;
+	if (!current->thread.nacc_cid)
+		return 0;
+	if (current->thread.nacc_flag & NACC_EXEC)
+		return 0;
+	if (!nacc_thread_is_inited() && !nacc_mm_is_active(current->mm))
+		return 0;
+	if (!bytes || !desc)
+		return -EFAULT;
+	if (desc->version != NACC_UACCESS_STRING_READ_DESC_VERSION)
+		return -EFAULT;
+
+	status = nacc_user_access_save_enable();
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UACCESS_SCOPE_BEGIN,
+			NACC_UACCESS_SCOPE_STRING_READ,
+			NACC_UACCESS_SCOPE_DIR_FROM_USER,
+			user_va, bytes, (unsigned long)desc, current->pid);
+	nacc_user_access_restore(status);
+	if (!ret.error)
+		return 1;
+	if (ret.error == SBI_ERR_NOT_SUPPORTED)
+		return 0;
+
+	printk_ratelimited(KERN_ERR "[NACC][uaccess-string-read-begin-failed] pid=%d comm=%s cid=%lx user_va=%lx bytes=%lu op=%lu buffer_va=%lx buffer_bytes=%lu caller=%lx err=%ld val=%ld\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   user_va, bytes, desc->op, desc->buffer_va,
+			   desc->buffer_bytes, desc->caller_pc, ret.error,
+			   ret.value);
+	return -EFAULT;
+}
+EXPORT_SYMBOL(nacc_uaccess_string_read_begin);
 
 bool nacc_uaccess_scope_end(enum nacc_uaccess_scope_class scope_class,
 			    enum nacc_uaccess_scope_direction direction,

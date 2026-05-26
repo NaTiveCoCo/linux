@@ -34,6 +34,29 @@ enum nacc_uaccess_scope_direction {
 	NACC_UACCESS_SCOPE_DIR_TO_USER = 2,
 };
 
+#define NACC_UACCESS_STRING_READ_DESC_VERSION	1UL
+#define NACC_UACCESS_STRING_READ_NO_NUL		(~0UL)
+
+enum nacc_uaccess_string_read_op {
+	NACC_UACCESS_STRING_READ_OP_UNKNOWN = 0,
+	NACC_UACCESS_STRING_READ_OP_COPY_CSTR = 1,
+	NACC_UACCESS_STRING_READ_OP_MEASURE_CSTR = 2,
+};
+
+struct nacc_uaccess_string_read_desc {
+	unsigned long version;
+	unsigned long op;
+	unsigned long flags;
+	unsigned long buffer_va;
+	unsigned long buffer_bytes;
+	unsigned long count;
+	unsigned long scanned_bytes;
+	unsigned long copied_bytes;
+	unsigned long nul_index;
+	unsigned long private_bytes;
+	unsigned long caller_pc;
+};
+
 /* 
  * The agent has already been initialized, and the new child process is forked.
  * This flag is set in the child process.
@@ -164,6 +187,9 @@ bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 			      unsigned long user_va,
 			      unsigned long bytes,
 			      unsigned long caller_pc);
+int nacc_uaccess_string_read_begin(unsigned long user_va,
+				   unsigned long bytes,
+				   struct nacc_uaccess_string_read_desc *desc);
 bool nacc_uaccess_scope_end(enum nacc_uaccess_scope_class scope_class,
 			    enum nacc_uaccess_scope_direction direction,
 			    unsigned long user_va,
