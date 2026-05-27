@@ -4,6 +4,7 @@
 #include <linux/atomic.h>
 #include <linux/init.h>
 #include <linux/panic.h>
+#include <linux/pagemap.h>
 #include <linux/pagewalk.h>
 #include <linux/percpu.h>
 #include <linux/string.h>
@@ -452,11 +453,30 @@ int nacc_private_data_get_user_read(unsigned long user_va,
 }
 EXPORT_SYMBOL(nacc_private_data_get_user_read);
 
+static int nacc_private_data_fault_in_writeable(unsigned long user_va,
+						unsigned long bytes)
+{
+	unsigned long status;
+	size_t left;
+
+	status = csr_read(CSR_STATUS);
+	if (status & SR_SUM)
+		csr_clear(CSR_STATUS, SR_SUM);
+
+	left = fault_in_safe_writeable((const char __user *)user_va, bytes);
+
+	if (status & SR_SUM)
+		csr_set(CSR_STATUS, SR_SUM);
+
+	return left ? -EFAULT : 0;
+}
+
 int nacc_private_data_put_user_write(unsigned long user_va,
 				     const void *value,
 				     unsigned long bytes)
 {
 	struct sbiret ret;
+	bool cow_retried = false;
 	u64 raw = 0;
 
 	if (!current->mm || !current->mm->pgd)
@@ -469,6 +489,7 @@ int nacc_private_data_put_user_write(unsigned long user_va,
 		return 0;
 
 	memcpy(&raw, value, bytes);
+retry:
 	ret = sbi_ecall(SBI_EXT_NACC,
 			SBI_EXT_NACC_UACCESS_PRIVATE_PUT_USER_WRITE,
 			user_va, (unsigned long)raw,
@@ -476,6 +497,22 @@ int nacc_private_data_put_user_write(unsigned long user_va,
 			current->pid);
 	if (!ret.error)
 		return 1;
+	/* NaCC uses DENIED_LOCKED as private put_user COW-needed. */
+	if (ret.error == SBI_ERR_DENIED_LOCKED && !cow_retried) {
+		int fault_ret;
+
+		cow_retried = true;
+		fault_ret = nacc_private_data_fault_in_writeable(user_va,
+								 bytes);
+		if (!fault_ret)
+			goto retry;
+
+		printk_ratelimited(KERN_ERR "[NACC][private-put-user-cow-failed] pid=%d comm=%s cid=%lx user_va=%lx bytes=%lu err=%d\n",
+				   current->pid, current->comm,
+				   current->thread.nacc_cid, user_va, bytes,
+				   fault_ret);
+		return -EFAULT;
+	}
 	if (ret.error == SBI_ERR_NOT_SUPPORTED)
 		return 0;
 
