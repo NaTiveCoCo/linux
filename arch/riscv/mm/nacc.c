@@ -595,6 +595,78 @@ int nacc_private_data_copy_to_user(unsigned long user_va,
 }
 EXPORT_SYMBOL(nacc_private_data_copy_to_user);
 
+int nacc_private_data_copy_from_user(unsigned long kernel_va,
+				     unsigned long user_va,
+				     unsigned long bytes,
+				     unsigned long caller_pc,
+				     unsigned long *left)
+{
+	unsigned long copied = 0;
+
+	if (left)
+		*left = bytes;
+
+	if (!current->mm || !current->mm->pgd)
+		return 0;
+	if (!nacc_private_data_uaccess_active())
+		return 0;
+	if (!left)
+		return -EFAULT;
+	if (!bytes) {
+		*left = 0;
+		return 1;
+	}
+
+	while (copied < bytes) {
+		unsigned long dst = kernel_va + copied;
+		unsigned long src = user_va + copied;
+		unsigned long chunk = bytes - copied;
+		unsigned long page_left;
+		struct sbiret ret;
+
+		page_left = PAGE_SIZE - (src & (PAGE_SIZE - 1));
+		if (chunk > page_left)
+			chunk = page_left;
+		page_left = PAGE_SIZE - (dst & (PAGE_SIZE - 1));
+		if (chunk > page_left)
+			chunk = page_left;
+
+		ret = sbi_ecall(SBI_EXT_NACC,
+				SBI_EXT_NACC_UACCESS_PRIVATE_COPY_FROM_USER,
+				src, dst, chunk, caller_pc, current->pid, 0);
+		if (ret.error == SBI_ERR_NOT_SUPPORTED) {
+			if (!copied)
+				return 0;
+			*left = bytes - copied;
+			return 1;
+		}
+		if (ret.error) {
+			printk_ratelimited(KERN_ERR "[NACC][private-copy-from-user-denied] pid=%d comm=%s cid=%lx kernel_va=%lx user_va=%lx bytes=%lu copied=%lu err=%ld val=%ld\n",
+					   current->pid, current->comm,
+					   current->thread.nacc_cid,
+					   kernel_va, user_va, bytes, copied,
+					   ret.error, ret.value);
+			*left = bytes - copied;
+			return copied ? 1 : -EFAULT;
+		}
+		if (!ret.value || ret.value > chunk) {
+			printk_ratelimited(KERN_ERR "[NACC][private-copy-from-user-bad-result] pid=%d comm=%s cid=%lx kernel_va=%lx user_va=%lx chunk=%lu copied=%lu val=%ld\n",
+					   current->pid, current->comm,
+					   current->thread.nacc_cid,
+					   dst, src, chunk, copied,
+					   ret.value);
+			*left = bytes - copied;
+			return copied ? 1 : -EFAULT;
+		}
+
+		copied += ret.value;
+	}
+
+	*left = 0;
+	return 1;
+}
+EXPORT_SYMBOL(nacc_private_data_copy_from_user);
+
 void add_to_reclaim_list(unsigned long pfn)
 {
     if (pfn < NACC_PTP_PFN_BASE || pfn >= NACC_PTP_PFN_END) {
