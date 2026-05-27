@@ -667,6 +667,80 @@ int nacc_private_data_copy_from_user(unsigned long kernel_va,
 }
 EXPORT_SYMBOL(nacc_private_data_copy_from_user);
 
+int nacc_private_data_clear_user(unsigned long user_va,
+				 unsigned long bytes,
+				 unsigned long caller_pc,
+				 unsigned long *left)
+{
+	unsigned long cleared = 0;
+
+	if (left)
+		*left = bytes;
+
+	if (!current->mm || !current->mm->pgd)
+		return 0;
+	if (!nacc_private_data_uaccess_active())
+		return 0;
+	if (!left)
+		return -EFAULT;
+	if (!bytes) {
+		*left = 0;
+		return 1;
+	}
+
+	while (cleared < bytes) {
+		unsigned long dst = user_va + cleared;
+		unsigned long chunk = bytes - cleared;
+		unsigned long page_left;
+		unsigned long status;
+		struct sbiret ret;
+
+		page_left = PAGE_SIZE - (dst & (PAGE_SIZE - 1));
+		if (chunk > page_left)
+			chunk = page_left;
+
+		status = csr_read(CSR_STATUS);
+		if (!(status & SR_SUM))
+			csr_set(CSR_STATUS, SR_SUM);
+		ret = sbi_ecall(SBI_EXT_NACC,
+				SBI_EXT_NACC_UACCESS_PRIVATE_CLEAR_USER,
+				dst, chunk, caller_pc, current->pid, 0, 0);
+		if (!(status & SR_SUM))
+			csr_clear(CSR_STATUS, SR_SUM);
+
+		if (ret.error == SBI_ERR_NOT_SUPPORTED) {
+			if (!cleared)
+				return 0;
+			*left = bytes - cleared;
+			return 1;
+		}
+		if (ret.error) {
+			printk_ratelimited(KERN_ERR "[NACC][private-clear-user-denied] pid=%d comm=%s cid=%lx user_va=%lx bytes=%lu cleared=%lu err=%ld val=%ld\n",
+					   current->pid, current->comm,
+					   current->thread.nacc_cid,
+					   user_va, bytes, cleared,
+					   ret.error, ret.value);
+			*left = bytes - cleared;
+			return cleared ? 1 : -EFAULT;
+		}
+		if (!ret.value || ret.value > chunk) {
+			printk_ratelimited(KERN_ERR "[NACC][private-clear-user-bad-result] pid=%d comm=%s cid=%lx user_va=%lx chunk=%lu cleared=%lu val=%ld\n",
+					   current->pid, current->comm,
+					   current->thread.nacc_cid,
+					   dst, chunk, cleared,
+					   ret.value);
+			*left = bytes - cleared;
+			return cleared ? 1 : -EFAULT;
+		}
+
+		cleared += ret.value;
+	}
+
+	*left = 0;
+	return 1;
+}
+EXPORT_SYMBOL(nacc_private_data_clear_user);
+
 void add_to_reclaim_list(unsigned long pfn)
 {
     if (pfn < NACC_PTP_PFN_BASE || pfn >= NACC_PTP_PFN_END) {

@@ -424,7 +424,23 @@ unsigned long __must_check clear_user(void __user *to, unsigned long n)
 	unsigned long ret;
 
 	might_fault();
-	ret = access_ok(to, n) ? __clear_user(to, n) : n;
+	if (!access_ok(to, n))
+		return n;
+
+#ifdef NACC
+	if (n && nacc_private_data_uaccess_active()) {
+		int nacc_ret;
+
+		nacc_ret = nacc_private_data_clear_user((unsigned long)to,
+							n, _RET_IP_, &ret);
+		if (nacc_ret > 0)
+			return ret;
+		if (nacc_ret < 0)
+			return n;
+	}
+#endif
+
+	ret = __clear_user(to, n);
 	return ret;
 }
 

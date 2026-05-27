@@ -211,6 +211,10 @@ int nacc_private_data_copy_from_user(unsigned long kernel_va,
 				     unsigned long bytes,
 				     unsigned long caller_pc,
 				     unsigned long *left);
+int nacc_private_data_clear_user(unsigned long user_va,
+				 unsigned long bytes,
+				 unsigned long caller_pc,
+				 unsigned long *left);
 #endif
 
 #endif /* _ASM_RISCV_NACC_H */
