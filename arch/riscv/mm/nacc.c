@@ -551,7 +551,7 @@ int nacc_private_data_copy_to_user(unsigned long user_va,
 		unsigned long chunk = bytes - copied;
 		unsigned long page_left;
 		struct sbiret ret;
-		bool prefault_retried = false;
+		bool write_fault_retried = false;
 
 		page_left = PAGE_SIZE - (dst & (PAGE_SIZE - 1));
 		if (chunk > page_left)
@@ -564,20 +564,23 @@ retry:
 		ret = sbi_ecall(SBI_EXT_NACC,
 				SBI_EXT_NACC_UACCESS_PRIVATE_COPY_TO_USER,
 				dst, src, chunk, caller_pc, current->pid, 0);
-		if (ret.error == SBI_ERR_NOT_SUPPORTED && !prefault_retried) {
+		if ((ret.error == SBI_ERR_NOT_SUPPORTED ||
+		     ret.error == SBI_ERR_DENIED_LOCKED) &&
+		    !write_fault_retried) {
 			int fault_ret;
 
-			prefault_retried = true;
+			write_fault_retried = true;
 			fault_ret = nacc_private_data_fault_in_writeable(dst,
 									 chunk);
 			if (!fault_ret)
 				goto retry;
 
-			printk_ratelimited(KERN_ERR "[NACC][private-copy-to-user-prefault-failed] pid=%d comm=%s cid=%lx user_va=%lx kernel_va=%lx bytes=%lu dst=%lx src=%lx chunk=%lu copied=%lu err=%d\n",
+			printk_ratelimited(KERN_ERR "[NACC][private-copy-to-user-prefault-failed] pid=%d comm=%s cid=%lx user_va=%lx kernel_va=%lx bytes=%lu dst=%lx src=%lx chunk=%lu copied=%lu sbi_err=%ld err=%d\n",
 					   current->pid, current->comm,
 					   current->thread.nacc_cid,
 					   user_va, kernel_va, bytes, dst,
-					   src, chunk, copied, fault_ret);
+					   src, chunk, copied, ret.error,
+					   fault_ret);
 			*left = bytes - copied;
 			return copied ? 1 : -EFAULT;
 		}
