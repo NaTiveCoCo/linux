@@ -18,6 +18,7 @@
 #include <linux/entry-common.h>
 
 #include <asm/ptrace.h>
+#include <asm/nacc.h>
 #include <asm/tlbflush.h>
 
 #include "../kernel/head.h"
@@ -322,7 +323,7 @@ lock_mmap:
 
 retry:
     if (current->thread.nacc_flag)
-	    printk(KERN_ERR "[Linux]: 'handle_page_fault' retry entry.\n");
+	    nacc_debug("[Linux]: 'handle_page_fault' retry entry.\n");
 
     vma = lock_mm_and_find_vma(mm, addr, regs);
 
@@ -338,7 +339,7 @@ retry:
 	 */
 	code = SEGV_ACCERR;
     if (current->thread.nacc_flag)
-        printk(KERN_ERR "[Linux]: 'handle_page_fault' the code is set to SEGV_ACCERR. Very crucial.\n");
+        nacc_debug("[Linux]: 'handle_page_fault' the code is set to SEGV_ACCERR. Very crucial.\n");
 
 	if (unlikely(access_error(cause, vma))) {
 		tsk->thread.bad_cause = cause;

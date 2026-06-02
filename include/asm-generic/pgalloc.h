@@ -8,6 +8,7 @@
 #define GFP_PGTABLE_USER	(GFP_PGTABLE_KERNEL | __GFP_ACCOUNT)
 
 #ifdef NACC
+#include <asm/nacc.h>
 #include <asm/sbi.h>
 
 static inline bool nacc_free_secure_ptdesc(struct ptdesc *ptdesc,
@@ -94,13 +95,13 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 		if (!new_pte_pfn_buf)
 			return NULL;
 
-		printk(KERN_ERR "[__pte_alloc] request pmd for address space, position: %lx\n",
-		       (unsigned long)virt_to_phys(new_pte_pfn_buf));
+		nacc_debug("[__pte_alloc] request pmd for address space, position: %lx\n",
+			   (unsigned long)virt_to_phys(new_pte_pfn_buf));
 		sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP,
 			  virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
 		new_pte_pfn = (*new_pte_pfn_buf) >> 12;
 		kfree(new_pte_pfn_buf);
-		printk(KERN_ERR "[__pte_alloc] new_pmd_pfn = %lx\n", new_pte_pfn);
+		nacc_debug("[__pte_alloc] new_pmd_pfn = %lx\n", new_pte_pfn);
 		if (page_nacc_register_ptp(new_pte_pfn, 0))
 			return NULL;
 		ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
@@ -191,14 +192,14 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 			if (!new_pte_pfn_buf)
 				return NULL;
 
-			printk(KERN_ERR "[__pmd_alloc] request pmd for address space, position: %lx\n",
-			       (unsigned long)virt_to_phys(new_pte_pfn_buf));
+			nacc_debug("[__pmd_alloc] request pmd for address space, position: %lx\n",
+				   (unsigned long)virt_to_phys(new_pte_pfn_buf));
 			sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP,
 				  virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
 			new_pmd_pfn = (*new_pte_pfn_buf) >> 12;
 			kfree(new_pte_pfn_buf);
-			printk(KERN_ERR "[__pmd_alloc] new_pmd_pfn = %lx\n",
-			       new_pmd_pfn);
+			nacc_debug("[__pmd_alloc] new_pmd_pfn = %lx\n",
+				   new_pmd_pfn);
 			if (page_nacc_register_ptp(new_pmd_pfn, 1))
 				return NULL;
 			ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));

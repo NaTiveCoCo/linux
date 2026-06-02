@@ -214,7 +214,7 @@ static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 	if (nacc_mm_is_active(tlb->mm)) {
 		unsigned long new_pfn = virt_to_pfn(pmd);
 
-			printk(KERN_ERR "[__pmd_free_tlb]: pmd_page_nacc will be called.\n");
+			nacc_debug("[__pmd_free_tlb]: pmd_page_nacc will be called.\n");
 			nacc_track_secure_ptp_pfn(new_pfn);
 			ptdesc = virt_to_ptdesc(pmd);
 			/* If ptdesc PFN is in NACC range, it's a pure NACC page — don't buddy free */

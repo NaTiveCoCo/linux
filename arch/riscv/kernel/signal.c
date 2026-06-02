@@ -22,6 +22,7 @@
 #include <asm/vector.h>
 #include <asm/csr.h>
 #include <asm/cacheflush.h>
+#include <asm/nacc.h>
 
 unsigned long signal_minsigstksz __ro_after_init;
 
@@ -242,10 +243,10 @@ SYSCALL_DEFINE0(rt_sigreturn)
 	frame = (struct rt_sigframe __user *)regs->sp;
 
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: rt_sigreturn entry pid=%d comm=%s cid=%lx frame=%px frame_size=%zu epc=%lx sp=%lx ra=%lx a0=%lx\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       frame, frame_size, regs->epc, regs->sp, regs->ra,
-		       regs->a0);
+		nacc_debug("[Linux]: rt_sigreturn entry pid=%d comm=%s cid=%lx frame=%px frame_size=%zu epc=%lx sp=%lx ra=%lx a0=%lx\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   frame, frame_size, regs->epc, regs->sp, regs->ra,
+			   regs->a0);
 	}
 
 	if (!access_ok(frame, frame_size)) {
@@ -281,9 +282,9 @@ SYSCALL_DEFINE0(rt_sigreturn)
 	regs->cause = -1UL;
 
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: rt_sigreturn restore done pid=%d comm=%s cid=%lx epc=%lx sp=%lx ra=%lx a0=%lx\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       regs->epc, regs->sp, regs->ra, regs->a0);
+		nacc_debug("[Linux]: rt_sigreturn restore done pid=%d comm=%s cid=%lx epc=%lx sp=%lx ra=%lx a0=%lx\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   regs->epc, regs->sp, regs->ra, regs->a0);
 	}
 
 	return regs->a0;
@@ -357,10 +358,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 
 	frame = get_sigframe(ksig, regs, frame_size);
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: setup_rt_frame pid=%d comm=%s cid=%lx sig=%d handler=%px old_epc=%lx old_ra=%lx old_sp=%lx frame=%px frame_size=%zu\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
-		       regs->sp, frame, frame_size);
+		nacc_debug("[Linux]: setup_rt_frame pid=%d comm=%s cid=%lx sig=%d handler=%px old_epc=%lx old_ra=%lx old_sp=%lx frame=%px frame_size=%zu\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
+			   regs->sp, frame, frame_size);
 	}
 	if (!access_ok(frame, frame_size))
 		return -EFAULT;
@@ -410,10 +411,10 @@ static int setup_rt_frame(struct ksignal *ksig, sigset_t *set,
 	regs->a2 = (unsigned long)(&frame->uc);   /* a2: ucontext pointer */
 
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: setup_rt_frame prepared pid=%d comm=%s cid=%lx sig=%d new_epc=%lx new_ra=%lx new_sp=%lx a0=%lx a1=%lx a2=%lx\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       ksig->sig, regs->epc, regs->ra, regs->sp,
-		       regs->a0, regs->a1, regs->a2);
+		nacc_debug("[Linux]: setup_rt_frame prepared pid=%d comm=%s cid=%lx sig=%d new_epc=%lx new_ra=%lx new_sp=%lx a0=%lx a1=%lx a2=%lx\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   ksig->sig, regs->epc, regs->ra, regs->sp,
+			   regs->a0, regs->a1, regs->a2);
 	}
 
 #if DEBUG_SIG
@@ -431,10 +432,10 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 	int ret;
 
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: handle_signal pid=%d comm=%s cid=%lx sig=%d handler=%px epc=%lx ra=%lx sp=%lx\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
-		       regs->sp);
+		nacc_debug("[Linux]: handle_signal pid=%d comm=%s cid=%lx sig=%d handler=%px epc=%lx ra=%lx sp=%lx\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   ksig->sig, ksig->ka.sa.sa_handler, regs->epc, regs->ra,
+			   regs->sp);
 	}
 
 	rseq_signal_deliver(ksig, regs);
@@ -446,9 +447,9 @@ static void handle_signal(struct ksignal *ksig, struct pt_regs *regs)
 		ret = setup_rt_frame(ksig, oldset, regs);
 
 	if (current->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: handle_signal setup_done pid=%d comm=%s cid=%lx sig=%d ret=%d epc=%lx ra=%lx sp=%lx\n",
-		       current->pid, current->comm, current->thread.nacc_cid,
-		       ksig->sig, ret, regs->epc, regs->ra, regs->sp);
+		nacc_debug("[Linux]: handle_signal setup_done pid=%d comm=%s cid=%lx sig=%d ret=%d epc=%lx ra=%lx sp=%lx\n",
+			   current->pid, current->comm, current->thread.nacc_cid,
+			   ksig->sig, ret, regs->epc, regs->ra, regs->sp);
 	}
 
 	signal_setup_done(ret, ksig, 0);

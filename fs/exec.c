@@ -395,8 +395,8 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	    current->thread.nacc_flag == NACC_FORKED ||
 	    current->thread.nacc_flag == NACC_EXEC) {
 		nacc_mm_set_state(mm, NACC_MM_ACTIVE);
-		printk(KERN_ERR "[Linux]: bprm_mm_init: mark new mm=%px as NACC_MM_ACTIVE for pid %d flag=%lx\n",
-		       mm, current->pid, current->thread.nacc_flag);
+		nacc_debug("[Linux]: bprm_mm_init: mark new mm=%px as NACC_MM_ACTIVE for pid %d flag=%lx\n",
+			   mm, current->pid, current->thread.nacc_flag);
 	}
 #endif
 
@@ -1315,8 +1315,8 @@ int begin_new_exec(struct linux_binprm * bprm)
 	 * caller somehow skipped nacc_prepare_exec_build_state().
 	 */
 	if (me->thread.nacc_flag & NACC_INITED) {
-		printk(KERN_ERR "[Linux]: execve: late dispatch fallback switches nacc_flag to NACC_EXEC after exec_mmap for pid %d\n",
-		       me->pid);
+		nacc_debug("[Linux]: execve: late dispatch fallback switches nacc_flag to NACC_EXEC after exec_mmap for pid %d\n",
+			   me->pid);
 		me->thread.nacc_flag = NACC_EXEC;
 	}
 #endif
@@ -1526,8 +1526,8 @@ static void nacc_prepare_exec_build_state(struct linux_binprm *bprm)
 		return;
 
 	current->thread.nacc_flag = NACC_EXEC;
-	printk(KERN_ERR "[Linux]: execve: switch nacc_flag to NACC_EXEC before bprm_mm_init for pid %d\n",
-	       current->pid);
+	nacc_debug("[Linux]: execve: switch nacc_flag to NACC_EXEC before bprm_mm_init for pid %d\n",
+		   current->pid);
 }
 
 static void nacc_restore_exec_build_state(struct linux_binprm *bprm)
@@ -1537,8 +1537,8 @@ static void nacc_restore_exec_build_state(struct linux_binprm *bprm)
 
 	if (current->thread.nacc_flag == NACC_EXEC) {
 		current->thread.nacc_flag = NACC_INITED;
-		printk(KERN_ERR "[Linux]: execve: restore nacc_flag to NACC_INITED after pre-commit exec failure for pid %d\n",
-		       current->pid);
+		nacc_debug("[Linux]: execve: restore nacc_flag to NACC_INITED after pre-commit exec failure for pid %d\n",
+			   current->pid);
 	}
 }
 #endif
@@ -1848,7 +1848,7 @@ static int search_binary_handler(struct linux_binprm *bprm)
 static int exec_binprm(struct linux_binprm *bprm)
 {
     if(current->thread.nacc_flag == 2) {
-        printk(KERN_ERR "nacc: exec_binprm called when nacc_flag is 2\n");
+        nacc_debug("nacc: exec_binprm called when nacc_flag is 2\n");
     }
 	pid_t old_pid, old_vpid;
 	int ret, depth;
@@ -1997,9 +1997,9 @@ static int do_execveat_common(int fd, struct filename *filename,
 
 #ifdef NACC
 	if (current->thread.nacc_flag) {
-		printk(KERN_ERR "[Linux]: do_execveat_common pid=%d comm=%s nacc_flag=%lx filename=%s\n",
-		       current->pid, current->comm, current->thread.nacc_flag,
-		       bprm->filename);
+		nacc_debug("[Linux]: do_execveat_common pid=%d comm=%s nacc_flag=%lx filename=%s\n",
+			   current->pid, current->comm,
+			   current->thread.nacc_flag, bprm->filename);
 	}
 #endif
 

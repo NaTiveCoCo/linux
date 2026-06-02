@@ -2,6 +2,7 @@
 #define _ASM_RISCV_NACC_H
 
 #ifndef __ASSEMBLY__
+#include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/sched.h>
 #define NACC_RECLAIM_LIST_SIZE 511
@@ -15,6 +16,16 @@ struct nacc_reclaim_list {
 	unsigned long pfns[NACC_RECLAIM_LIST_SIZE];
 	unsigned long count;
 };
+
+#ifdef NACC_LOG_DEBUG
+#define nacc_debug(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)
+#define nacc_debug_ratelimited(fmt, ...) \
+	printk_ratelimited(KERN_ERR fmt, ##__VA_ARGS__)
+#else
+#define nacc_debug(fmt, ...) no_printk(KERN_ERR fmt, ##__VA_ARGS__)
+#define nacc_debug_ratelimited(fmt, ...) \
+	no_printk(KERN_ERR fmt, ##__VA_ARGS__)
+#endif
 
 /* another macro for nacc_flag in nacc->thread field */
 #define NACC_PREPARE     0b001

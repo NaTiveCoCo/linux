@@ -209,7 +209,9 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 					    __pa(tlb->mm->pgd), 0);
 		else
 			pmd_clear(pmd);
-		printk(KERN_ERR "free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n", (unsigned long)pmd, pmd_val(*pmd), __page_val_to_pfn(pmd_val(*pmd)));
+		nacc_debug("free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n",
+			   (unsigned long)pmd, pmd_val(*pmd),
+			   __page_val_to_pfn(pmd_val(*pmd)));
 
 		if (nacc_pfn_is_secure_ptp(token_pfn)) {
 			/* Pure NACC PTE page: only do dtor cleanup, skip buddy free */
@@ -227,9 +229,9 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 	}
 	mm_dec_nr_ptes(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
-		printk(KERN_ERR "[Linux]: free_pte_range: mm=%px addr=%lx token_pfn=%lx pgtables_bytes %lu -> %lu\n",
-		       tlb->mm, addr, page_to_pfn(token),
-		       pgtables_before, mm_pgtables_bytes(tlb->mm));
+		nacc_debug("[Linux]: free_pte_range: mm=%px addr=%lx token_pfn=%lx pgtables_bytes %lu -> %lu\n",
+			   tlb->mm, addr, page_to_pfn(token),
+			   pgtables_before, mm_pgtables_bytes(tlb->mm));
 	}
 }
  
@@ -274,9 +276,9 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
-		printk(KERN_ERR "[Linux]: free_pmd_range: mm=%px start=%lx pgtables_bytes %lu -> %lu\n",
-		       tlb->mm, start, pgtables_before,
-		       mm_pgtables_bytes(tlb->mm));
+		nacc_debug("[Linux]: free_pmd_range: mm=%px start=%lx pgtables_bytes %lu -> %lu\n",
+			   tlb->mm, start, pgtables_before,
+			   mm_pgtables_bytes(tlb->mm));
 	}
     // if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "[Linux]: after mm_dec_nr_pmds\n");
@@ -1759,8 +1761,8 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 	tlb_change_page_size(tlb, PAGE_SIZE);
 	init_rss_vec(rss);
 	if (nacc_mm_is_active(mm)) {
-		printk(KERN_ERR "zap_pte_range: start\n");
-        printk(KERN_ERR "addr: %lx end: %lx\n", addr, end);
+		nacc_debug("zap_pte_range: start\n");
+        nacc_debug("addr: %lx end: %lx\n", addr, end);
     }
     start_pte = pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 	if (!pte)
@@ -1865,7 +1867,7 @@ static unsigned long zap_pte_range(struct mmu_gather *tlb,
 		tlb_flush_mmu(tlb);
 
 	if (nacc_mm_is_active(mm))
-		printk(KERN_ERR "zap_pte_range: end\n");
+		nacc_debug("zap_pte_range: end\n");
 	return addr;
 }
 
@@ -1996,15 +1998,15 @@ void unmap_page_range(struct mmu_gather *tlb,
 			       (vma->vm_flags & VM_NACC));
 	if (unlikely(current->thread.nacc_flag || nacc_mm_state(vma->vm_mm) ||
 		     (vma->vm_flags & VM_NACC))) {
-		printk(KERN_ERR "[Linux]: unmap_page_range pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx addr=%lx end=%lx hit_nacc_reclaim=%d\n",
-		       current->pid, current->thread.nacc_flag,
-		       nacc_mm_state(vma->vm_mm),
-		       vma->vm_start, vma->vm_end, vma->vm_flags,
-		       addr, end, hit_nacc_reclaim);
+		nacc_debug("[Linux]: unmap_page_range pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx addr=%lx end=%lx hit_nacc_reclaim=%d\n",
+			   current->pid, current->thread.nacc_flag,
+			   nacc_mm_state(vma->vm_mm),
+			   vma->vm_start, vma->vm_end, vma->vm_flags,
+			   addr, end, hit_nacc_reclaim);
 	}
 	if (hit_nacc_reclaim) {
-		printk(KERN_ERR "  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
-		       vma->vm_start, vma->vm_end);
+		nacc_debug("  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
+			   vma->vm_start, vma->vm_end);
 		pgtbl_debug(virt_to_phys(tlb->mm->pgd));
 		sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_AGENT_REGION,
 			  vma->vm_start, vma->vm_end, virt_to_phys(tlb->mm->pgd),
@@ -2040,11 +2042,11 @@ static void unmap_single_vma(struct mmu_gather *tlb,
 
 	if (unlikely(current->thread.nacc_flag || nacc_mm_state(vma->vm_mm) ||
 		     (vma->vm_flags & VM_NACC))) {
-		printk(KERN_ERR "[Linux]: unmap_single_vma pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx start=%lx end=%lx vm_nacc=%d\n",
-		       current->pid, current->thread.nacc_flag,
-		       nacc_mm_state(vma->vm_mm),
-		       vma->vm_start, vma->vm_end, vma->vm_flags,
-		       start, end, !!(vma->vm_flags & VM_NACC));
+		nacc_debug("[Linux]: unmap_single_vma pid=%d nacc_flag=%lx mm_state=%lx vma=[%lx,%lx) vm_flags=%lx start=%lx end=%lx vm_nacc=%d\n",
+			   current->pid, current->thread.nacc_flag,
+			   nacc_mm_state(vma->vm_mm),
+			   vma->vm_start, vma->vm_end, vma->vm_flags,
+			   start, end, !!(vma->vm_flags & VM_NACC));
 	}
 
 	if (vma->vm_file)

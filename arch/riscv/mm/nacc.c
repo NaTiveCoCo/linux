@@ -36,10 +36,11 @@ static void nacc_dump_ptdesc_state(const char *tag, unsigned long pfn,
 
        mapcount = page_mapcount_is_type(mapcount) ? 0 : mapcount + 1;
 
-       printk(KERN_ERR "[Linux]: %s: pfn=%lx level=%u(%s) ptdesc=%px ptl=%px flags=%lx page_type=%x refcount=%d mapcount=%d\n",
-              tag, pfn, level, nacc_ptp_level_name(level), ptdesc,
-              ptlock_ptr(ptdesc), ptdesc->__page_flags, ptdesc->__page_type,
-              atomic_read(&ptdesc->__page_refcount), mapcount);
+       nacc_debug("[Linux]: %s: pfn=%lx level=%u(%s) ptdesc=%px ptl=%px flags=%lx page_type=%x refcount=%d mapcount=%d\n",
+                  tag, pfn, level, nacc_ptp_level_name(level), ptdesc,
+                  ptlock_ptr(ptdesc), ptdesc->__page_flags,
+                  ptdesc->__page_type,
+                  atomic_read(&ptdesc->__page_refcount), mapcount);
 }
 
 static unsigned long *nacc_mapping_slot(unsigned long pfn)
@@ -113,8 +114,9 @@ bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 	to_pfn = page_to_pfn(to);
 	root_pgd_pa = __pa(vma->vm_mm->pgd);
 
-	printk(KERN_ERR "[NACC][copy-user-highpage] linux enter mm=%px pid=%d vaddr=%lx root=%lx from_pfn=%lx to_pfn=%lx\n",
-	       vma->vm_mm, current->pid, vaddr, root_pgd_pa, from_pfn, to_pfn);
+	nacc_debug("[NACC][copy-user-highpage] linux enter mm=%px pid=%d vaddr=%lx root=%lx from_pfn=%lx to_pfn=%lx\n",
+		   vma->vm_mm, current->pid, vaddr, root_pgd_pa, from_pfn,
+		   to_pfn);
 
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_COPY_USER_HIGHPAGE,
 			from_pfn, to_pfn, vaddr, root_pgd_pa,
@@ -125,9 +127,9 @@ bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 		panic("NaCC copy_user_highpage ecall failed");
 	}
 
-	printk(KERN_ERR "[NACC][copy-user-highpage] linux result vaddr=%lx from_pfn=%lx to_pfn=%lx result=%s(%ld)\n",
-	       vaddr, from_pfn, to_pfn,
-	       nacc_copy_user_highpage_result_name(ret.value), ret.value);
+	nacc_debug("[NACC][copy-user-highpage] linux result vaddr=%lx from_pfn=%lx to_pfn=%lx result=%s(%ld)\n",
+		   vaddr, from_pfn, to_pfn,
+		   nacc_copy_user_highpage_result_name(ret.value), ret.value);
 
 	switch (ret.value) {
 	case NACC_COPY_USER_HIGHPAGE_NOT_HANDLED:
@@ -254,11 +256,11 @@ int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag)
 	if (!ret)
 		flush_tlb_mm(mm);
 
-	printk(KERN_ERR "[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu private_hint_vmas=%lu tagged_resident_ptes=%lu resident_skipped=%lu already_nacc=%lu special=%lu non_user=%lu empty=%lu\n",
-	       tag, mm, ret, end, stats.vmas, stats.private_hint_vmas,
-	       stats.resident_ptes, stats.resident_skipped_ptes,
-	       stats.already_nacc_ptes, stats.special_ptes,
-	       stats.non_user_ptes, stats.empty_ptes);
+	nacc_debug("[Linux]: nacc_detach_user_leaf_pages tag=%s mm=%px ret=%d range=[0,%lx) vmas=%lu private_hint_vmas=%lu tagged_resident_ptes=%lu resident_skipped=%lu already_nacc=%lu special=%lu non_user=%lu empty=%lu\n",
+		   tag, mm, ret, end, stats.vmas, stats.private_hint_vmas,
+		   stats.resident_ptes, stats.resident_skipped_ptes,
+		   stats.already_nacc_ptes, stats.special_ptes,
+		   stats.non_user_ptes, stats.empty_ptes);
 
 	return ret;
 }
@@ -776,7 +778,9 @@ void add_to_reclaim_list(unsigned long pfn)
     
 	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
 	reclaim_list->pfns[reclaim_list->count++] = pfn;
-    printk(KERN_ERR "[Linux]: add pfn: %lx to reclaim list, count: %lx\n", reclaim_list->pfns[reclaim_list->count - 1], reclaim_list->count);
+    nacc_debug("[Linux]: add pfn: %lx to reclaim list, count: %lx\n",
+               reclaim_list->pfns[reclaim_list->count - 1],
+               reclaim_list->count);
     // when it meets the max size, flush it.
 	if (reclaim_list->count == NACC_RECLAIM_LIST_SIZE) {
 		flush_reclaim_list();
@@ -790,7 +794,8 @@ void flush_reclaim_list(void)
 	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
 	if (reclaim_list->count > 0) {
         for (int i = 0; i < reclaim_list->count; i++)
-            printk(KERN_ERR "[Linux]: calling flush_reclaim_list with pfn: %lx\n", reclaim_list->pfns[i]);
+            nacc_debug("[Linux]: calling flush_reclaim_list with pfn: %lx\n",
+                       reclaim_list->pfns[i]);
         sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_PTP,
 				  __pa(reclaim_list->pfns), reclaim_list->count,
 				  0, 0, 0, 0);
@@ -801,14 +806,18 @@ void flush_reclaim_list(void)
 
 void pgtbl_debug(unsigned long pgd)
 {
+#ifdef NACC_LOG_DEBUG
     struct sbiret ret;
 
-    printk(KERN_ERR "[Linux]: calling pgtbl_debug SBI call pgd=%lx\n", pgd);
+    nacc_debug("[Linux]: calling pgtbl_debug SBI call pgd=%lx\n", pgd);
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_DEBUG,
                     pgd, 0,
                     0, 0, 0, 0);
-    printk(KERN_ERR "[Linux]: pgtbl_debug SBI returned error=%ld value=%ld\n",
-           ret.error, ret.value);
+    nacc_debug("[Linux]: pgtbl_debug SBI returned error=%ld value=%ld\n",
+               ret.error, ret.value);
+#else
+    (void)pgd;
+#endif
 }
 
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
@@ -831,10 +840,10 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 	WRITE_ONCE(*(unsigned long *)&ptdesc->ptl, 0);
 	if (slot && old_slot == pfn)
 		WRITE_ONCE(*slot, 0);
-	printk(KERN_ERR "[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx old_slot=%lx new_slot=%lx\n",
-	       tag, pfn, level, old_ptl,
-	       nacc_ptdesc_raw_ptl(ptdesc), old_slot,
-	       slot ? READ_ONCE(*slot) : 0);
+	nacc_debug("[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx old_slot=%lx new_slot=%lx\n",
+		   tag, pfn, level, old_ptl,
+		   nacc_ptdesc_raw_ptl(ptdesc), old_slot,
+		   slot ? READ_ONCE(*slot) : 0);
 }
 EXPORT_SYMBOL(nacc_reclaim_ptp_dtor);
 
@@ -858,14 +867,14 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
        if (*slot == pfn) {
                ptdesc = page_ptdesc(pfn_to_page(pfn));
                if (nacc_ptdesc_raw_ptl(ptdesc)) {
-                       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s ptdesc=%px ptl=%lx\n",
-                              pfn, nacc_ptp_level_name(level),
-                              ptdesc, nacc_ptdesc_raw_ptl(ptdesc));
+               nacc_debug("[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s ptdesc=%px ptl=%lx\n",
+                          pfn, nacc_ptp_level_name(level),
+                          ptdesc, nacc_ptdesc_raw_ptl(ptdesc));
                        return 0;
                }
 
-               printk(KERN_ERR "[Linux]: page_nacc_register_ptp: recovering stale slot for pfn=%lx level=%u(%s)\n",
-                      pfn, level, nacc_ptp_level_name(level));
+               nacc_debug("[Linux]: page_nacc_register_ptp: recovering stale slot for pfn=%lx level=%u(%s)\n",
+                          pfn, level, nacc_ptp_level_name(level));
                WRITE_ONCE(*slot, 0);
        }
 
@@ -898,8 +907,9 @@ static int __page_nacc_register_ptp(struct mm_struct *mm,
 		       mm_inc_nr_pmds(mm);
 	       else
 		       mm_inc_nr_ptes(mm);
-	       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: mm=%px pfn=%lx level=%u pgtables_bytes %lu -> %lu\n",
-		      mm, pfn, level, pgtables_before, mm_pgtables_bytes(mm));
+	       nacc_debug("[Linux]: page_nacc_register_ptp: mm=%px pfn=%lx level=%u pgtables_bytes %lu -> %lu\n",
+			  mm, pfn, level, pgtables_before,
+			  mm_pgtables_bytes(mm));
        }
 
        *slot = pfn;

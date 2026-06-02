@@ -16,6 +16,7 @@
 
 #include <linux/slab.h>
 #include <linux/gfp.h>
+#include <asm/nacc.h>
 #include <asm/page.h>
 #include <asm/processor.h>
 
@@ -49,8 +50,8 @@ static void nacc_activate_current_mm(const char *tag)
 
     if (!(old_state & NACC_MM_ACTIVE)) {
         nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
-        printk(KERN_ERR "[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
-	       tag, current->mm, old_state, nacc_mm_state(current->mm));
+        nacc_debug("[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
+	           tag, current->mm, old_state, nacc_mm_state(current->mm));
     }
 }
 
@@ -88,12 +89,12 @@ static void nacc_log_sys_mmap(const char *tag, unsigned long addr,
 	if (!nacc_trace_mmap_syscall())
 		return;
 
-	printk(KERN_ERR "[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx "
-	       "addr=%lx len=%lx prot=%lx flags=%lx fd=%lx offset=%llx "
-	       "shift=%lu ret=%ld\n",
-	       tag, current->pid, current->mm, current->thread.nacc_flag,
-	       nacc_mm_state(current->mm), addr, len, prot, flags, fd,
-	       (unsigned long long)offset, page_shift_offset, ret);
+	nacc_debug("[Linux]: %s pid=%d mm=%px flag=%lx mm_state=%lx "
+		   "addr=%lx len=%lx prot=%lx flags=%lx fd=%lx offset=%llx "
+		   "shift=%lu ret=%ld\n",
+		   tag, current->pid, current->mm, current->thread.nacc_flag,
+		   nacc_mm_state(current->mm), addr, len, prot, flags, fd,
+		   (unsigned long long)offset, page_shift_offset, ret);
 }
 
 int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
@@ -160,9 +161,9 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 
     mmap_write_unlock(mm);
 
-    printk(KERN_ERR "[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx), mm state unchanged=%lx\n",
-           tag, virt_agent, virt_end, virt_agent, virt_agent + NACC_AGENT_MEM_SIZE,
-           nacc_mm_state(mm));
+    nacc_debug("[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx), mm state unchanged=%lx\n",
+               tag, virt_agent, virt_end, virt_agent,
+               virt_agent + NACC_AGENT_MEM_SIZE, nacc_mm_state(mm));
 
     return 0;
 }
@@ -216,7 +217,7 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     if (nacc_insert_agent_vma(&virt_agent, tag))
         return;
 
-    printk(KERN_ERR "[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
+    nacc_debug("[Linux]: %s using virt_agent %lx\n", tag, virt_agent);
 
     nacc_activate_current_mm(tag);
     if (nacc_detach_user_leaf_pages(current->mm, tag))
@@ -311,7 +312,7 @@ SYSCALL_DEFINE3(riscv_flush_icache, uintptr_t, start, uintptr_t, end,
 
 void nacc_invoke(void)
 {
-    printk(KERN_ERR "[Linux]: start_thread is invoked for NACC process. \n");
+    nacc_debug("[Linux]: start_thread is invoked for NACC process. \n");
     __nacc_invoke_full(SBI_EXT_NACC_INVOKE, "nacc_invoke");
 }
 
@@ -329,12 +330,12 @@ void nacc_exec(void)
      * - hand the new user pt_regs to OpenSBI
      * Trap-context refresh inside agent/OpenSBI is handled separately.
      */
-    printk(KERN_ERR "[Linux]: NACC_EXEC preparing minimal reattach path.\n");
+    nacc_debug("[Linux]: NACC_EXEC preparing minimal reattach path.\n");
 
     if (nacc_insert_agent_vma(&virt_agent, "nacc_exec"))
         return;
 
-    printk(KERN_ERR "[Linux]: nacc_exec using virt_agent %lx\n", virt_agent);
+    nacc_debug("[Linux]: nacc_exec using virt_agent %lx\n", virt_agent);
 
     /*
      * Re-exec now follows the same "non-returning" shape as nacc_invoke():
@@ -377,13 +378,14 @@ void nacc_invoke_child(void)
     unsigned long cid = current->thread.nacc_cid;
     struct pt_regs *regs = task_pt_regs(current);
 
-    printk(KERN_ERR "[Linux]: NaCC re-attach process, pid=%lu, cid=%lx\n", pid, cid);
+    nacc_debug("[Linux]: NaCC re-attach process, pid=%lu, cid=%lx\n",
+               pid, cid);
 
     if (nacc_insert_agent_vma(&virt_agent, "nacc_invoke_child"))
         return;
 
-    printk(KERN_ERR "[Linux]: Child re-attach uses fixed virt_agent %lx\n",
-           virt_agent);
+    nacc_debug("[Linux]: Child re-attach uses fixed virt_agent %lx\n",
+               virt_agent);
 
     /* Call into OpenSBI to register child, validate secure user PTPs, and map agent.
      * We pass the cid explicitly to allow OpenSBI to register this child properly.
@@ -402,7 +404,7 @@ void nacc_invoke_child(void)
      */
     current->thread.nacc_flag = NACC_INITED;
 
-    printk(KERN_ERR "[Linux]: nacc_invoke_child done, child continues in Linux.\n");
+    nacc_debug("[Linux]: nacc_invoke_child done, child continues in Linux.\n");
 }
 
 void nacc_attach_forked_child_if_needed(void)
@@ -430,14 +432,14 @@ void nacc_attach_forked_child_if_needed(void)
     cid = current->thread.nacc_cid;
     user_pt_regs = (unsigned long)task_pt_regs(current);
 
-    printk(KERN_ERR "[Linux]: first user return attaches fork child, pid=%lu cid=%lx nacc_flag=%lx mm=%px regs=%px state=%lx epc=%lx sp=%lx ra=%lx tp=%lx a0=%lx a1=%lx a2=%lx a3=%lx a0_is_zero=%s\n",
-           pid, cid, current->thread.nacc_flag, current->mm,
-           (void *)user_pt_regs, nacc_mm_state(current->mm),
-           task_pt_regs(current)->epc, task_pt_regs(current)->sp,
-           task_pt_regs(current)->ra, task_pt_regs(current)->tp,
-           task_pt_regs(current)->a0, task_pt_regs(current)->a1,
-           task_pt_regs(current)->a2, task_pt_regs(current)->a3,
-           task_pt_regs(current)->a0 == 0 ? "yes" : "no");
+    nacc_debug("[Linux]: first user return attaches fork child, pid=%lu cid=%lx nacc_flag=%lx mm=%px regs=%px state=%lx epc=%lx sp=%lx ra=%lx tp=%lx a0=%lx a1=%lx a2=%lx a3=%lx a0_is_zero=%s\n",
+               pid, cid, current->thread.nacc_flag, current->mm,
+               (void *)user_pt_regs, nacc_mm_state(current->mm),
+               task_pt_regs(current)->epc, task_pt_regs(current)->sp,
+               task_pt_regs(current)->ra, task_pt_regs(current)->tp,
+               task_pt_regs(current)->a0, task_pt_regs(current)->a1,
+               task_pt_regs(current)->a2, task_pt_regs(current)->a3,
+               task_pt_regs(current)->a0 == 0 ? "yes" : "no");
 
     vma_ret = nacc_insert_agent_vma(&virt_agent, "nacc_attach_forked_child");
     if (vma_ret) {
@@ -492,8 +494,8 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
         return;
     }
 
-    printk(KERN_ERR "[Linux]: register fork child pid early, parent pid=%d child_pid=%lu cid=%lx\n",
-           current->pid, child_pid, cid);
+    nacc_debug("[Linux]: register fork child pid early, parent pid=%d child_pid=%lu cid=%lx\n",
+               current->pid, child_pid, cid);
 
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, child_pid,
                     0, 0, 0, 0);
@@ -519,8 +521,8 @@ void nacc_unregister_current_pid(void)
         return;
     }
 
-    printk(KERN_ERR "[Linux]: nacc unregister pid=%lu cid=%lx\n",
-           pid, current->thread.nacc_cid);
+    nacc_debug("[Linux]: nacc unregister pid=%lu cid=%lx\n",
+               pid, current->thread.nacc_cid);
 }
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
@@ -637,7 +639,7 @@ int nacc_retire_private_pfn_sbi(unsigned long pfn)
 SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
 {
     unsigned long pid;
-    printk(KERN_ERR "[Linux] register a new NACC process. \n");
+    nacc_debug("[Linux] register a new NACC process. \n");
 
     /*
      * Mark the current process as nacc process here.
@@ -647,11 +649,11 @@ SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
     current->thread.nacc_cid = cid;
 
     pid = current->pid;
-    printk(KERN_ERR "[Linux]: container id is %lx. \n", cid);
+    nacc_debug("[Linux]: container id is %lx. \n", cid);
 
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, pid, 0, 0, 0, 0);
 
-    printk(KERN_ERR "[Linux]: GO BACK TO RUNC. \n");
+    nacc_debug("[Linux]: GO BACK TO RUNC. \n");
 
     return 0;
 }

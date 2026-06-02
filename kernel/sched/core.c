@@ -84,6 +84,7 @@
 #include <uapi/linux/sched/types.h>
 
 #include <asm/irq_regs.h>
+#include <asm/nacc.h>
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
 #include <asm/page.h>
@@ -5340,7 +5341,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             /* if prev task_struct is nacc process */
             if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-				printk(KERN_INFO "nacc: context_switch from user to kernel\n");
+				nacc_debug("nacc: context_switch from user to kernel\n");
                 sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, 0, 0, 0, 0, 0);
             }
 #endif

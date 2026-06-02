@@ -1950,9 +1950,9 @@ void exit_mmap(struct mm_struct *mm)
     }
 
     if (unlikely(current->thread.nacc_flag || nacc_mm_state(mm))) {
-        printk(KERN_ERR "[Linux]: exit_mmap pid=%d nacc_flag=%lx mm_state=%lx mm=%px pgd=%px\n",
-               current->pid, current->thread.nacc_flag,
-               nacc_mm_state(mm), mm, mm->pgd);
+        nacc_debug("[Linux]: exit_mmap pid=%d nacc_flag=%lx mm_state=%lx mm=%px pgd=%px\n",
+                   current->pid, current->thread.nacc_flag,
+                   nacc_mm_state(mm), mm, mm->pgd);
     }
 
 	struct mmu_gather tlb;
@@ -1982,7 +1982,7 @@ void exit_mmap(struct mm_struct *mm)
 	/* Use ULONG_MAX here to ensure all VMAs in the mm are unmapped */
 	unmap_vmas(&tlb, &vmi.mas, vma, 0, ULONG_MAX, ULONG_MAX, false);
     if (nacc_mm_is_active(mm)) {
-        printk(KERN_ERR "[Linux] after unmap_vmas \n");
+        nacc_debug("[Linux] after unmap_vmas \n");
         pgtbl_debug(virt_to_phys(mm->pgd));
     }
 	mmap_read_unlock(mm);
