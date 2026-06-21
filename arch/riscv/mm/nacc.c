@@ -2,11 +2,13 @@
 #include <linux/errno.h>
 // #include <linux/kernel.h>
 #include <linux/atomic.h>
+#include <linux/debugfs.h>
 #include <linux/init.h>
 #include <linux/panic.h>
 #include <linux/pagemap.h>
 #include <linux/pagewalk.h>
 #include <linux/percpu.h>
+#include <linux/seq_file.h>
 #include <linux/string.h>
 #include <asm/nacc.h>
 
@@ -18,6 +20,391 @@
 #include <asm/tlbflush.h>
 
 extern unsigned long nacc_mappings_virt;
+
+#ifdef NACC_PROFILE
+enum nacc_profile_linux_counter {
+	NACC_PROFILE_LINUX_MM_ACTIVE_ENTER = 0,
+	NACC_PROFILE_LINUX_MM_ACTIVE_EXIT,
+	NACC_PROFILE_LINUX_ROOT_TAG,
+	NACC_PROFILE_LINUX_ROOT_RETIRE,
+	NACC_PROFILE_LINUX_SYSCALL_REGISTER,
+	NACC_PROFILE_LINUX_FORK_CHILD_REGISTER,
+	NACC_PROFILE_LINUX_UNREGISTER_SUCCESS,
+	NACC_PROFILE_LINUX_UNREGISTER_FAIL,
+	NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_QUEUE,
+	NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_FLUSH,
+	NACC_PROFILE_LINUX_LIVE_MM_ACTIVE,
+	NACC_PROFILE_LINUX_LIVE_ROOT_L0,
+	NACC_PROFILE_LINUX_LIVE_SECURE_PTP_QUEUED,
+	NACC_PROFILE_LINUX_COUNTER_MAX,
+};
+
+#define NACC_PROFILE_LINUX_LIVE_FIRST NACC_PROFILE_LINUX_LIVE_MM_ACTIVE
+
+static const char * const nacc_profile_linux_names[] = {
+	[NACC_PROFILE_LINUX_MM_ACTIVE_ENTER] = "mm_active_enter",
+	[NACC_PROFILE_LINUX_MM_ACTIVE_EXIT] = "mm_active_exit",
+	[NACC_PROFILE_LINUX_ROOT_TAG] = "root_l0_tag",
+	[NACC_PROFILE_LINUX_ROOT_RETIRE] = "root_l0_retire",
+	[NACC_PROFILE_LINUX_SYSCALL_REGISTER] = "syscall_register",
+	[NACC_PROFILE_LINUX_FORK_CHILD_REGISTER] = "fork_child_register",
+	[NACC_PROFILE_LINUX_UNREGISTER_SUCCESS] = "task_unregister_success",
+	[NACC_PROFILE_LINUX_UNREGISTER_FAIL] = "task_unregister_fail",
+	[NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_QUEUE] = "secure_ptp_reclaim_queue",
+	[NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_FLUSH] = "secure_ptp_reclaim_flush",
+	[NACC_PROFILE_LINUX_LIVE_MM_ACTIVE] = "mm_active",
+	[NACC_PROFILE_LINUX_LIVE_ROOT_L0] = "root_l0",
+	[NACC_PROFILE_LINUX_LIVE_SECURE_PTP_QUEUED] = "secure_ptp_reclaim_queued",
+};
+
+static const char * const nacc_profile_sbi_names[] = {
+	[NACC_PROFILE_SBI_CONTAINER_REGISTER] = "container_register",
+	[NACC_PROFILE_SBI_CONTAINER_UNREGISTER] = "container_unregister",
+	[NACC_PROFILE_SBI_TASK_REGISTER] = "task_register",
+	[NACC_PROFILE_SBI_TASK_UNREGISTER] = "task_unregister",
+	[NACC_PROFILE_SBI_TASK_REGISTER_FAIL] = "task_register_fail",
+	[NACC_PROFILE_SBI_TASK_UNREGISTER_FAIL] = "task_unregister_fail",
+	[NACC_PROFILE_SBI_METADATA_CONTAINER_ALLOC] = "metadata_container_alloc",
+	[NACC_PROFILE_SBI_METADATA_CONTAINER_FREE] = "metadata_container_free",
+	[NACC_PROFILE_SBI_METADATA_PROCESS_ALLOC] = "metadata_process_alloc",
+	[NACC_PROFILE_SBI_METADATA_PROCESS_FREE] = "metadata_process_free",
+	[NACC_PROFILE_SBI_METADATA_PID_HASH_ALLOC] = "metadata_pid_hash_alloc",
+	[NACC_PROFILE_SBI_METADATA_PID_HASH_FREE] = "metadata_pid_hash_free",
+	[NACC_PROFILE_SBI_METADATA_THREAD_CTX_ALLOC] = "metadata_thread_ctx_alloc",
+	[NACC_PROFILE_SBI_METADATA_THREAD_CTX_FREE] = "metadata_thread_ctx_free",
+	[NACC_PROFILE_SBI_METADATA_ALLOC_FAIL] = "metadata_alloc_fail",
+	[NACC_PROFILE_SBI_SECURE_PTP_ALLOC] = "secure_ptp_alloc",
+	[NACC_PROFILE_SBI_SECURE_PTP_FREE] = "secure_ptp_free",
+	[NACC_PROFILE_SBI_SECURE_PTP_ALLOC_FAIL] = "secure_ptp_alloc_fail",
+	[NACC_PROFILE_SBI_ROOT_L0_TAG] = "root_l0_tag",
+	[NACC_PROFILE_SBI_ROOT_L0_RETIRE] = "root_l0_retire",
+	[NACC_PROFILE_SBI_ROOT_L0_TAG_FAIL] = "root_l0_tag_fail",
+	[NACC_PROFILE_SBI_PRIVATE_PFN_ACQUIRE] = "private_pfn_acquire",
+	[NACC_PROFILE_SBI_PRIVATE_PFN_RETIRE] = "private_pfn_retire",
+	[NACC_PROFILE_SBI_PRIVATE_PFN_FIRST_REF] = "private_pfn_first_ref",
+	[NACC_PROFILE_SBI_PRIVATE_PFN_LAST_REF] = "private_pfn_last_ref",
+	[NACC_PROFILE_SBI_PRIVATE_PFN_ACQUIRE_FAIL] = "private_pfn_acquire_fail",
+	[NACC_PROFILE_SBI_LIVE_CONTAINER] = "container",
+	[NACC_PROFILE_SBI_LIVE_TASK] = "task",
+	[NACC_PROFILE_SBI_LIVE_METADATA_CONTAINER] = "metadata_container",
+	[NACC_PROFILE_SBI_LIVE_METADATA_PROCESS] = "metadata_process",
+	[NACC_PROFILE_SBI_LIVE_METADATA_PID_HASH] = "metadata_pid_hash",
+	[NACC_PROFILE_SBI_LIVE_METADATA_THREAD_CTX] = "metadata_thread_ctx",
+	[NACC_PROFILE_SBI_LIVE_SECURE_PTP] = "secure_ptp",
+	[NACC_PROFILE_SBI_LIVE_ROOT_L0] = "root_l0",
+	[NACC_PROFILE_SBI_LIVE_PRIVATE_PFN] = "private_pfn",
+};
+
+#define NACC_PROFILE_SBI_LIVE_FIRST NACC_PROFILE_SBI_LIVE_CONTAINER
+
+static atomic64_t nacc_profile_linux_counters[NACC_PROFILE_LINUX_COUNTER_MAX];
+static s64 nacc_profile_linux_live_baseline[NACC_PROFILE_LINUX_COUNTER_MAX];
+static s64 nacc_profile_sbi_live_baseline[NACC_PROFILE_SBI_COUNTER_MAX];
+static atomic64_t nacc_profile_reset_count;
+
+static void nacc_profile_linux_inc(enum nacc_profile_linux_counter id)
+{
+	atomic64_inc(&nacc_profile_linux_counters[id]);
+}
+
+static void nacc_profile_linux_add(enum nacc_profile_linux_counter id, long value)
+{
+	atomic64_add(value, &nacc_profile_linux_counters[id]);
+}
+
+static s64 nacc_profile_linux_read(enum nacc_profile_linux_counter id)
+{
+	return atomic64_read(&nacc_profile_linux_counters[id]);
+}
+
+static int nacc_profile_sbi_read(enum nacc_profile_sbi_counter id, s64 *value)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_PROFILE_READ, id,
+			0, 0, 0, 0, 0);
+	if (ret.error)
+		return ret.error;
+
+	*value = ret.value;
+	return 0;
+}
+
+static void nacc_profile_reset_counters(void)
+{
+	struct sbiret ret;
+	s64 value;
+	int i;
+
+	for (i = 0; i < NACC_PROFILE_LINUX_LIVE_FIRST; i++)
+		atomic64_set(&nacc_profile_linux_counters[i], 0);
+	for (i = NACC_PROFILE_LINUX_LIVE_FIRST;
+	     i < NACC_PROFILE_LINUX_COUNTER_MAX; i++)
+		nacc_profile_linux_live_baseline[i] =
+			nacc_profile_linux_read(i);
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_PROFILE_RESET,
+			0, 0, 0, 0, 0, 0);
+	if (!ret.error) {
+		for (i = NACC_PROFILE_SBI_LIVE_FIRST;
+		     i < NACC_PROFILE_SBI_COUNTER_MAX; i++) {
+			if (nacc_profile_sbi_read(i, &value))
+				value = 0;
+			nacc_profile_sbi_live_baseline[i] = value;
+		}
+	}
+
+	atomic64_inc(&nacc_profile_reset_count);
+}
+
+void nacc_profile_mm_active_enter(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_MM_ACTIVE_ENTER);
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_LIVE_MM_ACTIVE);
+}
+EXPORT_SYMBOL(nacc_profile_mm_active_enter);
+
+void nacc_profile_mm_active_exit(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_MM_ACTIVE_EXIT);
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_LIVE_MM_ACTIVE, -1);
+}
+EXPORT_SYMBOL(nacc_profile_mm_active_exit);
+
+void nacc_profile_root_tag(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_ROOT_TAG);
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_LIVE_ROOT_L0);
+}
+EXPORT_SYMBOL(nacc_profile_root_tag);
+
+void nacc_profile_root_retire(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_ROOT_RETIRE);
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_LIVE_ROOT_L0, -1);
+}
+EXPORT_SYMBOL(nacc_profile_root_retire);
+
+void nacc_profile_sys_register(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_SYSCALL_REGISTER);
+}
+EXPORT_SYMBOL(nacc_profile_sys_register);
+
+void nacc_profile_fork_child_register(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_FORK_CHILD_REGISTER);
+}
+EXPORT_SYMBOL(nacc_profile_fork_child_register);
+
+void nacc_profile_unregister_success(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_UNREGISTER_SUCCESS);
+}
+EXPORT_SYMBOL(nacc_profile_unregister_success);
+
+void nacc_profile_unregister_fail(void)
+{
+	nacc_profile_linux_inc(NACC_PROFILE_LINUX_UNREGISTER_FAIL);
+}
+EXPORT_SYMBOL(nacc_profile_unregister_fail);
+
+void nacc_profile_secure_ptp_queue(unsigned long count)
+{
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_QUEUE,
+			       count);
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_LIVE_SECURE_PTP_QUEUED,
+			       count);
+}
+EXPORT_SYMBOL(nacc_profile_secure_ptp_queue);
+
+void nacc_profile_secure_ptp_flush(unsigned long count)
+{
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_SECURE_PTP_RECLAIM_FLUSH,
+			       count);
+	nacc_profile_linux_add(NACC_PROFILE_LINUX_LIVE_SECURE_PTP_QUEUED,
+			       -(long)count);
+}
+EXPORT_SYMBOL(nacc_profile_secure_ptp_flush);
+
+static void nacc_profile_seq_counter_object(struct seq_file *m,
+					    const char * const *names,
+					    int first, int last,
+					    s64 (*read_fn)(int))
+{
+	int i;
+
+	seq_puts(m, "{");
+	for (i = first; i < last; i++) {
+		if (i != first)
+			seq_puts(m, ",");
+		seq_printf(m, "\"%s\":%lld", names[i],
+			   (long long)read_fn(i));
+	}
+	seq_puts(m, "}");
+}
+
+static s64 nacc_profile_linux_read_by_int(int id)
+{
+	return nacc_profile_linux_read(id);
+}
+
+static void nacc_profile_seq_linux_live(struct seq_file *m)
+{
+	int i;
+
+	seq_puts(m, "{");
+	for (i = NACC_PROFILE_LINUX_LIVE_FIRST;
+	     i < NACC_PROFILE_LINUX_COUNTER_MAX; i++) {
+		s64 baseline = nacc_profile_linux_live_baseline[i];
+			s64 live_value = nacc_profile_linux_read(i);
+
+		if (i != NACC_PROFILE_LINUX_LIVE_FIRST)
+			seq_puts(m, ",");
+		seq_printf(m,
+				   "\"%s\":{\"baseline\":%lld,\"current\":%lld,\"delta\":%lld}",
+				   nacc_profile_linux_names[i], (long long)baseline,
+				   (long long)live_value,
+				   (long long)(live_value - baseline));
+	}
+	seq_puts(m, "}");
+}
+
+static int nacc_profile_read_sbi_all(s64 *values)
+{
+	int first_error = 0;
+	int i;
+
+	for (i = 0; i < NACC_PROFILE_SBI_COUNTER_MAX; i++) {
+		int ret = nacc_profile_sbi_read(i, &values[i]);
+
+		if (ret) {
+			values[i] = 0;
+			if (!first_error)
+				first_error = ret;
+		}
+	}
+
+	return first_error;
+}
+
+static void nacc_profile_seq_sbi_counters(struct seq_file *m, s64 *values)
+{
+	int i;
+
+	seq_puts(m, "{");
+	for (i = 0; i < NACC_PROFILE_SBI_LIVE_FIRST; i++) {
+		if (i)
+			seq_puts(m, ",");
+		seq_printf(m, "\"%s\":%lld", nacc_profile_sbi_names[i],
+			   (long long)values[i]);
+	}
+	seq_puts(m, "}");
+}
+
+static void nacc_profile_seq_sbi_live(struct seq_file *m, s64 *values)
+{
+	int i;
+
+	seq_puts(m, "{");
+	for (i = NACC_PROFILE_SBI_LIVE_FIRST;
+	     i < NACC_PROFILE_SBI_COUNTER_MAX; i++) {
+		s64 baseline = nacc_profile_sbi_live_baseline[i];
+			s64 live_value = values[i];
+
+		if (i != NACC_PROFILE_SBI_LIVE_FIRST)
+			seq_puts(m, ",");
+		seq_printf(m,
+				   "\"%s\":{\"baseline\":%lld,\"current\":%lld,\"delta\":%lld}",
+				   nacc_profile_sbi_names[i], (long long)baseline,
+				   (long long)live_value,
+				   (long long)(live_value - baseline));
+	}
+	seq_puts(m, "}");
+}
+
+static int nacc_lifecycle_snapshot_show(struct seq_file *m, void *v)
+{
+	s64 sbi_values[NACC_PROFILE_SBI_COUNTER_MAX];
+	int sbi_error;
+
+	(void)v;
+
+	sbi_error = nacc_profile_read_sbi_all(sbi_values);
+
+	seq_puts(m, "{");
+	seq_puts(m, "\"format\":\"nacc_lifecycle_v1\",");
+	seq_printf(m, "\"profile_enabled\":true,\"reset_count\":%lld,",
+		   (long long)atomic64_read(&nacc_profile_reset_count));
+	seq_puts(m, "\"linux\":{");
+	seq_puts(m, "\"counters\":");
+	nacc_profile_seq_counter_object(m, nacc_profile_linux_names, 0,
+					NACC_PROFILE_LINUX_LIVE_FIRST,
+					nacc_profile_linux_read_by_int);
+	seq_puts(m, ",\"live\":");
+	nacc_profile_seq_linux_live(m);
+	seq_puts(m, "},");
+	seq_printf(m, "\"opensbi\":{\"available\":%s,\"last_error\":%d",
+		   sbi_error ? "false" : "true", sbi_error);
+	if (!sbi_error) {
+		seq_puts(m, ",\"counters\":");
+		nacc_profile_seq_sbi_counters(m, sbi_values);
+		seq_puts(m, ",\"live\":");
+		nacc_profile_seq_sbi_live(m, sbi_values);
+	}
+	seq_puts(m, "}}\n");
+
+	return 0;
+}
+
+static int nacc_lifecycle_snapshot_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, nacc_lifecycle_snapshot_show, inode->i_private);
+}
+
+static const struct file_operations nacc_lifecycle_snapshot_fops = {
+	.open = nacc_lifecycle_snapshot_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+	.release = single_release,
+};
+
+static ssize_t nacc_lifecycle_reset_write(struct file *file,
+					  const char __user *buf,
+					  size_t count, loff_t *ppos)
+{
+	(void)file;
+	(void)buf;
+	(void)ppos;
+
+	if (count)
+		nacc_profile_reset_counters();
+	return count;
+}
+
+static const struct file_operations nacc_lifecycle_reset_fops = {
+	.write = nacc_lifecycle_reset_write,
+	.llseek = noop_llseek,
+};
+
+static int __init nacc_lifecycle_debugfs_init(void)
+{
+	struct dentry *root;
+	struct dentry *dir;
+
+	nacc_profile_reset_counters();
+
+	root = debugfs_create_dir("nacc", NULL);
+	dir = debugfs_create_dir("lifecycle", root);
+	debugfs_create_file("snapshot", 0444, dir, NULL,
+			    &nacc_lifecycle_snapshot_fops);
+	debugfs_create_file("reset", 0200, dir, NULL,
+			    &nacc_lifecycle_reset_fops);
+
+	return 0;
+}
+late_initcall(nacc_lifecycle_debugfs_init);
+#endif /* NACC_PROFILE */
 
 static const char *nacc_ptp_level_name(unsigned int level)
 {
@@ -778,6 +1165,7 @@ void add_to_reclaim_list(unsigned long pfn)
     
 	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
 	reclaim_list->pfns[reclaim_list->count++] = pfn;
+	nacc_profile_secure_ptp_queue(1);
     nacc_debug("[Linux]: add pfn: %lx to reclaim list, count: %lx\n",
                reclaim_list->pfns[reclaim_list->count - 1],
                reclaim_list->count);
@@ -793,12 +1181,15 @@ void flush_reclaim_list(void)
     // After the full transfer function, flush_reclaim_list function should be called.
 	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
 	if (reclaim_list->count > 0) {
+		unsigned long count = reclaim_list->count;
+
         for (int i = 0; i < reclaim_list->count; i++)
             nacc_debug("[Linux]: calling flush_reclaim_list with pfn: %lx\n",
                        reclaim_list->pfns[i]);
         sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_PTP,
 				  __pa(reclaim_list->pfns), reclaim_list->count,
 				  0, 0, 0, 0);
+		nacc_profile_secure_ptp_flush(count);
 		reclaim_list->count = 0;
 	}
 	put_cpu_var(reclaim_list);

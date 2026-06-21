@@ -50,6 +50,7 @@ static void nacc_activate_current_mm(const char *tag)
 
     if (!(old_state & NACC_MM_ACTIVE)) {
         nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
+        nacc_profile_mm_active_enter();
         nacc_debug("[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
 	           tag, current->mm, old_state, nacc_mm_state(current->mm));
     }
@@ -497,6 +498,7 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
     nacc_debug("[Linux]: register fork child pid early, parent pid=%d child_pid=%lu cid=%lx\n",
                current->pid, child_pid, cid);
 
+    nacc_profile_fork_child_register();
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, child_pid,
                     0, 0, 0, 0);
     if (ret.error) {
@@ -516,11 +518,13 @@ void nacc_unregister_current_pid(void)
     ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UNREGISTER, pid,
                     0, 0, 0, 0, 0);
     if (ret.error) {
+        nacc_profile_unregister_fail();
         printk(KERN_ERR "[Linux]: nacc unregister failed: pid=%lu cid=%lx err=%ld val=%ld\n",
                pid, current->thread.nacc_cid, ret.error, ret.value);
         return;
     }
 
+    nacc_profile_unregister_success();
     nacc_debug("[Linux]: nacc unregister pid=%lu cid=%lx\n",
                pid, current->thread.nacc_cid);
 }
@@ -586,6 +590,7 @@ int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)
 		return -EIO;
 	}
 
+	nacc_profile_root_tag();
 	return 0;
 }
 
@@ -598,7 +603,10 @@ void nacc_retire_root_sbi(unsigned long pgd_pa)
 	if (ret.error) {
 		printk(KERN_ERR "[Linux]: nacc_retire_root_sbi failed: pgd_pa=%lx err=%ld val=%ld\n",
 		       pgd_pa, ret.error, ret.value);
+		return;
 	}
+
+	nacc_profile_root_retire();
 }
 
 int nacc_acquire_private_pfn_sbi(unsigned long pfn)
@@ -651,6 +659,7 @@ SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
     pid = current->pid;
     nacc_debug("[Linux]: container id is %lx. \n", cid);
 
+    nacc_profile_sys_register();
     sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, pid, 0, 0, 0, 0);
 
     nacc_debug("[Linux]: GO BACK TO RUNC. \n");

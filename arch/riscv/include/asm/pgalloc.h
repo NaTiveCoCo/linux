@@ -185,6 +185,14 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 				return NULL;
 			}
 			nacc_mm_set_state(mm, NACC_MM_ROOT_TAGGED);
+			/*
+			 * dup_mm() copies the parent's active NaCC state before
+			 * allocating the child's root page table. Count that
+			 * inherited active-mm lifecycle here so pgd_free() has a
+			 * matching profile enter.
+			 */
+			if (nacc_mm_is_active(mm))
+				nacc_profile_mm_active_enter();
 		}
 	}
 	return pgd;
@@ -201,6 +209,8 @@ static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 	 */
 	if (mm && pgd && nacc_mm_root_tagged(mm))
 		nacc_retire_root_sbi(virt_to_phys(pgd));
+	if (mm && nacc_mm_is_active(mm))
+		nacc_profile_mm_active_exit();
 
 	pagetable_free(virt_to_ptdesc(pgd));
 }

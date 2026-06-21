@@ -233,8 +233,26 @@ static inline bool arch_supports_page_table_move(void)
 #endif
 
 #ifdef CONFIG_HAVE_MOVE_PMD
+static pmd_t move_pmd_get_and_clear(struct mm_struct *mm, unsigned long addr,
+				    pmd_t *pmdp)
+{
+	pmd_t pmd;
+
+#ifdef NACC
+	/* Secure PTP slots must be cleared through M-mode. */
+	if (mm && nacc_is_secure_ptp_virt(pmdp) && nacc_use_secure_pt(mm))
+		return __pmd(nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
+						 __pa(pmdp), 0, addr,
+						 __pa(mm->pgd), 0));
+#endif
+	pmd = *pmdp;
+	pmd_clear(pmdp);
+
+	return pmd;
+}
+
 static bool move_normal_pmd(struct vm_area_struct *vma, unsigned long old_addr,
-		  unsigned long new_addr, pmd_t *old_pmd, pmd_t *new_pmd)
+			  unsigned long new_addr, pmd_t *old_pmd, pmd_t *new_pmd)
 {
 	spinlock_t *old_ptl, *new_ptl;
 	struct mm_struct *mm = vma->vm_mm;
@@ -284,7 +302,7 @@ static bool move_normal_pmd(struct vm_area_struct *vma, unsigned long old_addr,
 	if (unlikely(!pmd_present(pmd) || pmd_leaf(pmd)))
 		goto out_unlock;
 	/* Clear the pmd */
-	pmd_clear(old_pmd);
+	pmd = move_pmd_get_and_clear(mm, old_addr, old_pmd);
 	res = true;
 
 	VM_BUG_ON(!pmd_none(*new_pmd));

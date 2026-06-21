@@ -48,6 +48,9 @@
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
 #include <asm/exec.h>
+#if defined(CONFIG_RISCV) && defined(NACC)
+#include <asm/nacc.h>
+#endif
 
 #include <trace/events/task.h>
 #include "internal.h"
@@ -897,28 +900,66 @@ static int dump_emit_page(struct coredump_params *cprm, struct page *page)
  * IO. This is not performance-critical enough to warrant having
  * all the machine check logic in the iovec paths.
  */
-#ifdef copy_mc_to_kernel
-
-#define dump_page_alloc() alloc_page(GFP_KERNEL)
-#define dump_page_free(x) __free_page(x)
-static struct page *dump_page_copy(struct page *src, struct page *dst)
+static struct page *dump_page_alloc(void)
 {
-	void *buf = kmap_local_page(src);
-	size_t left = copy_mc_to_kernel(page_address(dst), buf, PAGE_SIZE);
+#ifdef copy_mc_to_kernel
+	return alloc_page(GFP_KERNEL);
+#elif defined(CONFIG_RISCV) && defined(NACC)
+	if (nacc_private_data_uaccess_active())
+		return alloc_page(GFP_KERNEL);
+#endif
+	/* We just want to return non-NULL; it's never used. */
+	return ERR_PTR(-EINVAL);
+}
+
+static void dump_page_free(struct page *page)
+{
+	if (!IS_ERR(page))
+		__free_page(page);
+}
+
+#if defined(CONFIG_RISCV) && defined(NACC)
+static struct page *nacc_dump_page_copy(unsigned long addr, struct page *dst)
+{
+	void *buf;
+	unsigned long left;
+
+	if (!nacc_private_data_uaccess_active())
+		return NULL;
+	if (IS_ERR(dst))
+		return NULL;
+
+	/*
+	 * Avoid feeding a NaCC PRIVATE_DATA page directly to the filesystem
+	 * write path; copy through the monitored uaccess path first.
+	 */
+	buf = kmap_local_page(dst);
+	left = copy_from_user(buf, (const void __user *)addr, PAGE_SIZE);
 	kunmap_local(buf);
+
 	return left ? NULL : dst;
 }
-
-#else
-
-/* We just want to return non-NULL; it's never used. */
-#define dump_page_alloc() ERR_PTR(-EINVAL)
-#define dump_page_free(x) ((void)(x))
-static inline struct page *dump_page_copy(struct page *src, struct page *dst)
-{
-	return src;
-}
 #endif
+
+static inline struct page *dump_page_copy(struct page *src, struct page *dst,
+					  unsigned long addr)
+{
+#if defined(CONFIG_RISCV) && defined(NACC)
+	if (nacc_private_data_uaccess_active())
+		return nacc_dump_page_copy(addr, dst);
+#endif
+#ifdef copy_mc_to_kernel
+	{
+		void *buf = kmap_local_page(src);
+		size_t left = copy_mc_to_kernel(page_address(dst), buf, PAGE_SIZE);
+
+		kunmap_local(buf);
+		return left ? NULL : dst;
+	}
+#else
+	return src;
+#endif
+}
 
 int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		    unsigned long len)
@@ -942,7 +983,8 @@ int dump_user_range(struct coredump_params *cprm, unsigned long start,
 		 */
 		page = get_dump_page(addr);
 		if (page) {
-			int stop = !dump_emit_page(cprm, dump_page_copy(page, dump_page));
+			int stop = !dump_emit_page(cprm,
+					dump_page_copy(page, dump_page, addr));
 			put_page(page);
 			if (stop) {
 				dump_page_free(dump_page);
