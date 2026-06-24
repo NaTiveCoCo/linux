@@ -1638,6 +1638,58 @@ static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
 	return true;
 }
 
+static bool nacc_remote_vm_has_private_pte(struct mm_struct *mm,
+					   struct vm_area_struct *vma,
+					   unsigned long addr)
+{
+	spinlock_t *ptl;
+	pgd_t *pgd;
+	p4d_t *p4d;
+	pud_t *pud;
+	pmd_t *pmd;
+	p4d_t p4dval;
+	pud_t pudval;
+	pmd_t pmdval;
+	pte_t *ptep;
+	pte_t pte;
+	bool private = false;
+
+	if (!nacc_should_install_private_leaf(vma, addr))
+		return false;
+	if (addr < vma->vm_start || addr >= vma->vm_end)
+		return false;
+
+	pgd = pgd_offset(mm, addr);
+	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
+		return false;
+
+	p4d = p4d_offset(pgd, addr);
+	p4dval = READ_ONCE(*p4d);
+	if (p4d_none(p4dval) || unlikely(p4d_bad(p4dval)))
+		return false;
+
+	pud = pud_offset(p4d, addr);
+	pudval = READ_ONCE(*pud);
+	if (pud_none(pudval) || pud_leaf(pudval) ||
+	    unlikely(pud_bad(pudval)))
+		return false;
+
+	pmd = pmd_offset(pud, addr);
+	pmdval = pmdp_get_lockless(pmd);
+	if (pmd_none(pmdval) || pmd_leaf(pmdval) ||
+	    unlikely(pmd_bad(pmdval)))
+		return false;
+
+	ptep = pte_offset_map_lock(mm, pmd, addr, &ptl);
+	if (!ptep)
+		return false;
+	pte = ptep_get(ptep);
+	private = !!nacc_private_leaf_page(mm, vma, addr, pte, NULL);
+	pte_unmap_unlock(ptep, ptl);
+
+	return private;
+}
+
 static int nacc_access_remote_vm_private_copy(struct mm_struct *mm,
 					      struct vm_area_struct *vma,
 					      unsigned long addr,
@@ -1646,7 +1698,7 @@ static int nacc_access_remote_vm_private_copy(struct mm_struct *mm,
 {
 	unsigned long left;
 
-	if (!nacc_should_install_private_leaf(vma, addr))
+	if (!nacc_remote_vm_has_private_pte(mm, vma, addr))
 		return -EOPNOTSUPP;
 
 	if (mm != current->mm) {
@@ -6887,6 +6939,8 @@ static int __access_remote_vm(struct mm_struct *mm, unsigned long addr,
 							     gup_flags, &vma);
 
 		if (IS_ERR(page)) {
+			int private_copied;
+
 			/* We might need to expand the stack to access it */
 			vma = vma_lookup(mm, addr);
 			if (!vma) {
@@ -6900,18 +6954,37 @@ static int __access_remote_vm(struct mm_struct *mm, unsigned long addr,
 				continue;
 			}
 
-			/*
-			 * Check if this is a VM_IO | VM_PFNMAP VMA, which
-			 * we can access using slightly different code.
-			 */
-			bytes = 0;
+			bytes = len;
+			offset = addr & (PAGE_SIZE-1);
+			if (bytes > PAGE_SIZE-offset)
+				bytes = PAGE_SIZE-offset;
+
+			private_copied = nacc_access_remote_vm_private_copy(mm,
+									   vma,
+									   addr,
+									   buf,
+									   bytes,
+									   write);
+			if (private_copied >= 0) {
+				bytes = private_copied;
+				if (!bytes)
+					break;
+			} else {
+				/*
+				 * Check if this is a VM_IO | VM_PFNMAP VMA,
+				 * which we can access using slightly
+				 * different code.
+				 */
+				bytes = 0;
 #ifdef CONFIG_HAVE_IOREMAP_PROT
-			if (vma->vm_ops && vma->vm_ops->access)
-				bytes = vma->vm_ops->access(vma, addr, buf,
-							    len, write);
+				if (vma->vm_ops && vma->vm_ops->access)
+					bytes = vma->vm_ops->access(vma, addr,
+								    buf, len,
+								    write);
 #endif
-			if (bytes <= 0)
-				break;
+				if (bytes <= 0)
+					break;
+			}
 		} else {
 			int private_copied;
 
