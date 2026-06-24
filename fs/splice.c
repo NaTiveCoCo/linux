@@ -33,9 +33,13 @@
 #include <linux/fsnotify.h>
 #include <linux/security.h>
 #include <linux/gfp.h>
+#include <linux/highmem.h>
 #include <linux/net.h>
 #include <linux/socket.h>
 #include <linux/sched/signal.h>
+#if defined(CONFIG_RISCV) && defined(NACC)
+#include <asm/nacc.h>
+#endif
 
 #include "internal.h"
 
@@ -1492,6 +1496,63 @@ out:
 	return total ? total : ret;
 }
 
+#if defined(CONFIG_RISCV) && defined(NACC)
+static ssize_t nacc_copy_iter_to_pipe(struct iov_iter *from,
+				      struct pipe_inode_info *pipe)
+{
+	size_t total = 0;
+	ssize_t ret = 0;
+
+	while (iov_iter_count(from)) {
+		struct pipe_buffer buf = {
+			.ops = &default_pipe_buf_ops,
+		};
+		struct page *page;
+		size_t bytes;
+		size_t copied;
+		void *kaddr;
+
+		if (unlikely(!pipe->readers)) {
+			send_sig(SIGPIPE, current, 0);
+			ret = -EPIPE;
+			break;
+		}
+		if (pipe_full(pipe->head, pipe->tail, pipe->max_usage)) {
+			ret = -EAGAIN;
+			break;
+		}
+
+		page = alloc_page(GFP_HIGHUSER | __GFP_ACCOUNT);
+		if (unlikely(!page)) {
+			ret = -ENOMEM;
+			break;
+		}
+
+		bytes = min_t(size_t, iov_iter_count(from), PAGE_SIZE);
+		kaddr = kmap_local_page(page);
+		copied = copy_from_iter(kaddr, bytes, from);
+		kunmap_local(kaddr);
+
+		if (!copied) {
+			__free_page(page);
+			ret = -EFAULT;
+			break;
+		}
+
+		buf.page = page;
+		buf.offset = 0;
+		buf.len = copied;
+		ret = add_to_pipe(pipe, &buf);
+		if (unlikely(ret < 0))
+			break;
+
+		total += ret;
+	}
+
+	return total ? total : ret;
+}
+#endif
+
 static int pipe_to_user(struct pipe_inode_info *pipe, struct pipe_buffer *buf,
 			struct splice_desc *sd)
 {
@@ -1554,8 +1615,14 @@ static ssize_t vmsplice_to_pipe(struct file *file, struct iov_iter *iter,
 
 	pipe_lock(pipe);
 	ret = wait_for_space(pipe, flags);
-	if (!ret)
+	if (!ret) {
+#if defined(CONFIG_RISCV) && defined(NACC)
+		if (nacc_private_data_uaccess_active() && user_backed_iter(iter))
+			ret = nacc_copy_iter_to_pipe(iter, pipe);
+		else
+#endif
 		ret = iter_to_pipe(iter, pipe, buf_flag);
+	}
 	pipe_unlock(pipe);
 	if (ret > 0) {
 		wakeup_pipe_readers(pipe);

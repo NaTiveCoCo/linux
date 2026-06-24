@@ -1638,6 +1638,46 @@ static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
 	return true;
 }
 
+static int nacc_access_remote_vm_private_copy(struct mm_struct *mm,
+					      struct vm_area_struct *vma,
+					      unsigned long addr,
+					      void *buf, int bytes,
+					      bool write)
+{
+	unsigned long left;
+
+	if (!nacc_should_install_private_leaf(vma, addr))
+		return -EOPNOTSUPP;
+
+	if (mm != current->mm) {
+		printk_ratelimited(KERN_ERR "[NACC][remote-vm-private-denied] pid=%d comm=%s target_mm=%px current_mm=%px addr=%lx bytes=%d direction=%s\n",
+				   current->pid, current->comm, mm,
+				   current->mm, addr, bytes,
+				   write ? "to_remote" : "from_remote");
+		return 0;
+	}
+	if (!nacc_private_data_uaccess_active()) {
+		printk_ratelimited(KERN_ERR "[NACC][remote-vm-private-current-denied] pid=%d comm=%s mm=%px addr=%lx bytes=%d direction=%s\n",
+				   current->pid, current->comm, mm, addr,
+				   bytes, write ? "to_current" : "from_current");
+		return 0;
+	}
+
+	if (write)
+		left = copy_to_user((void __user *)addr, buf, bytes);
+	else
+		left = copy_from_user(buf, (const void __user *)addr, bytes);
+
+	if (left == bytes) {
+		printk_ratelimited(KERN_ERR "[NACC][remote-vm-private-current-failed] pid=%d comm=%s mm=%px addr=%lx bytes=%d direction=%s\n",
+				   current->pid, current->comm, mm, addr,
+				   bytes, write ? "to_current" : "from_current");
+		return 0;
+	}
+
+	return bytes - left;
+}
+
 static struct page *nacc_private_leaf_page(struct mm_struct *mm,
 		struct vm_area_struct *vma, unsigned long addr, pte_t ptent,
 		unsigned long *pfn_out)
@@ -6873,21 +6913,40 @@ static int __access_remote_vm(struct mm_struct *mm, unsigned long addr,
 			if (bytes <= 0)
 				break;
 		} else {
+			int private_copied;
+
 			bytes = len;
 			offset = addr & (PAGE_SIZE-1);
 			if (bytes > PAGE_SIZE-offset)
 				bytes = PAGE_SIZE-offset;
 
-			maddr = kmap_local_page(page);
-			if (write) {
-				copy_to_user_page(vma, page, addr,
-						  maddr + offset, buf, bytes);
-				set_page_dirty_lock(page);
+			private_copied = nacc_access_remote_vm_private_copy(mm,
+									   vma,
+									   addr,
+									   buf,
+									   bytes,
+									   write);
+			if (private_copied < 0) {
+				maddr = kmap_local_page(page);
+				if (write) {
+					copy_to_user_page(vma, page, addr,
+							  maddr + offset, buf,
+							  bytes);
+					set_page_dirty_lock(page);
+				} else {
+					copy_from_user_page(vma, page, addr,
+							    buf, maddr + offset,
+							    bytes);
+				}
+				unmap_and_put_page(page, maddr);
 			} else {
-				copy_from_user_page(vma, page, addr,
-						    buf, maddr + offset, bytes);
+				bytes = private_copied;
+				if (write && bytes)
+					set_page_dirty_lock(page);
+				put_page(page);
 			}
-			unmap_and_put_page(page, maddr);
+			if (!bytes)
+				break;
 		}
 		len -= bytes;
 		buf += bytes;
