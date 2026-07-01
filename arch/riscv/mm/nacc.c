@@ -7,6 +7,7 @@
 #include <linux/panic.h>
 #include <linux/pagemap.h>
 #include <linux/pagewalk.h>
+#include <linux/page_ref.h>
 #include <linux/percpu.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
@@ -485,6 +486,53 @@ static const char *nacc_copy_user_highpage_result_name(long result)
 	}
 }
 
+static void nacc_log_copy_user_highpage_context(const char *stage,
+						struct page *to,
+						struct page *from,
+						unsigned long vaddr,
+						struct vm_area_struct *vma,
+						unsigned long root_pgd_pa,
+						unsigned long from_pfn,
+						unsigned long to_pfn,
+						long result,
+						void *caller)
+{
+#ifndef NACC_LOG_DEBUG
+	(void)stage;
+	(void)to;
+	(void)from;
+	(void)vaddr;
+	(void)vma;
+	(void)root_pgd_pa;
+	(void)from_pfn;
+	(void)to_pfn;
+	(void)result;
+	(void)caller;
+#else
+	struct mm_struct *mm = vma ? vma->vm_mm : NULL;
+	unsigned long vm_start = vma ? vma->vm_start : 0;
+	unsigned long vm_end = vma ? vma->vm_end : 0;
+	unsigned long vm_flags = vma ? READ_ONCE(vma->vm_flags) : 0;
+	unsigned long vm_pgoff = vma ? vma->vm_pgoff : 0;
+	unsigned long mm_state = mm ? nacc_mm_state(mm) : 0;
+	int from_map;
+	int to_map;
+
+	from_map = atomic_read(&from->_mapcount);
+	from_map = page_mapcount_is_type(from_map) ? 0 : from_map + 1;
+	to_map = atomic_read(&to->_mapcount);
+	to_map = page_mapcount_is_type(to_map) ? 0 : to_map + 1;
+
+	nacc_debug("[NACC][copy-user-highpage] linux %s comm=%s pid=%d tgid=%d caller=%pS mm=%px mm_state=%lx vaddr=%lx root=%lx vma=[%lx,%lx) vm_flags=%lx vm_pgoff=%lx has_file=%u from_pfn=%lx from_ref=%d from_map=%d to_pfn=%lx to_ref=%d to_map=%d result=%s(%ld)\n",
+		   stage, current->comm, current->pid, current->tgid, caller,
+		   mm, mm_state, vaddr, root_pgd_pa, vm_start, vm_end,
+		   vm_flags, vm_pgoff, vma && vma->vm_file, from_pfn,
+		   page_ref_count(from), from_map, to_pfn, page_ref_count(to),
+		   to_map,
+		   nacc_copy_user_highpage_result_name(result), result);
+#endif
+}
+
 bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 				    unsigned long vaddr,
 				    struct vm_area_struct *vma)
@@ -493,6 +541,7 @@ bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 	unsigned long from_pfn;
 	unsigned long to_pfn;
 	unsigned long root_pgd_pa;
+	void *caller = __builtin_return_address(0);
 
 	if (!vma || !vma->vm_mm || !nacc_mm_is_active(vma->vm_mm))
 		return false;
@@ -501,22 +550,23 @@ bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 	to_pfn = page_to_pfn(to);
 	root_pgd_pa = __pa(vma->vm_mm->pgd);
 
-	nacc_debug("[NACC][copy-user-highpage] linux enter mm=%px pid=%d vaddr=%lx root=%lx from_pfn=%lx to_pfn=%lx\n",
-		   vma->vm_mm, current->pid, vaddr, root_pgd_pa, from_pfn,
-		   to_pfn);
+	nacc_log_copy_user_highpage_context("enter", to, from, vaddr, vma,
+					    root_pgd_pa, from_pfn, to_pfn,
+					    -1, caller);
 
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_COPY_USER_HIGHPAGE,
 			from_pfn, to_pfn, vaddr, root_pgd_pa,
 			current->pid, 0);
 	if (ret.error) {
-		printk(KERN_ERR "[NACC][copy-user-highpage] linux ecall failed vaddr=%lx from_pfn=%lx to_pfn=%lx err=%ld val=%ld\n",
-		       vaddr, from_pfn, to_pfn, ret.error, ret.value);
+		printk(KERN_ERR "[NACC][copy-user-highpage] linux ecall failed comm=%s pid=%d caller=%pS vaddr=%lx root=%lx from_pfn=%lx to_pfn=%lx err=%ld val=%ld\n",
+		       current->comm, current->pid, caller, vaddr, root_pgd_pa,
+		       from_pfn, to_pfn, ret.error, ret.value);
 		panic("NaCC copy_user_highpage ecall failed");
 	}
 
-	nacc_debug("[NACC][copy-user-highpage] linux result vaddr=%lx from_pfn=%lx to_pfn=%lx result=%s(%ld)\n",
-		   vaddr, from_pfn, to_pfn,
-		   nacc_copy_user_highpage_result_name(ret.value), ret.value);
+	nacc_log_copy_user_highpage_context("result", to, from, vaddr, vma,
+					    root_pgd_pa, from_pfn, to_pfn,
+					    ret.value, caller);
 
 	switch (ret.value) {
 	case NACC_COPY_USER_HIGHPAGE_NOT_HANDLED:
