@@ -652,9 +652,13 @@ static int nacc_detach_pte_entry(pte_t *ptep, unsigned long addr,
 		stats->already_nacc_ptes++;
 	else if (!nacc_vma_private_anon_hint(walk->vma))
 		stats->resident_skipped_ptes++;
-	else if (nacc_pte_is_linux_special_leaf(oldpte))
+	else if (nacc_pte_is_linux_special_leaf(oldpte)) {
 		stats->special_ptes++;
-	else {
+		if (nacc_vma_is_vvar_abi_data(walk->vma) &&
+		    nacc_record_vvar_sbi(__pa(walk->mm->pgd), addr,
+					 pte_pfn(oldpte)))
+			return -EIO;
+	} else {
 		nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE, __pa(ptep),
 				    pte_val(pte_mknacc(oldpte)), addr,
 				    __pa(walk->mm->pgd), 0);

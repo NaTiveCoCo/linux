@@ -165,6 +165,10 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 		return VM_FAULT_SIGBUS;
 	}
 
+	if (vma->vm_mm && nacc_use_secure_pt(vma->vm_mm) &&
+	    nacc_record_vvar_sbi(__pa(vma->vm_mm->pgd), vmf->address, pfn))
+		return VM_FAULT_SIGBUS;
+
 	return vmf_insert_pfn(vma, vmf->address, pfn);
 }
 

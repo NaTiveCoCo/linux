@@ -31,6 +31,8 @@
 #include <linux/uaccess.h>
 #include <linux/security.h>
 
+#include <asm/nacc.h>
+
 #define DEVMEM_MINOR	1
 #define DEVPORT_MINOR	4
 
@@ -527,6 +529,12 @@ static int mmap_zero(struct file *file, struct vm_area_struct *vma)
 	if (vma->vm_flags & VM_SHARED)
 		return shmem_zero_setup(vma);
 	vma_set_anonymous(vma);
+	if (vma->vm_mm && nacc_mm_is_active(vma->vm_mm) &&
+	    !(vma->vm_flags & (VM_MAYSHARE | VM_PFNMAP | VM_MIXEDMAP)) &&
+	    vma->vm_end > vma->vm_start &&
+	    vma->vm_start < min_t(unsigned long, TASK_SIZE,
+				  NACC_USER_VPN2_PROTECTED_END))
+		vm_flags_set(vma, VM_NACC_APP);
 	return 0;
 }
 

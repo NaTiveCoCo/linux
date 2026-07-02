@@ -608,6 +608,31 @@ static const struct mm_walk_ops prot_none_walk_ops = {
 	.walk_lock		= PGWALK_WRLOCK,
 };
 
+static bool nacc_mprotect_private_protnone_unsupported(
+		struct vm_area_struct *vma, unsigned long start,
+		unsigned long end, unsigned long newflags)
+{
+	unsigned long protected_end;
+
+	if (newflags & VM_ACCESS_FLAGS)
+		return false;
+	if (!vma || !vma->vm_mm || !nacc_mm_is_active(vma->vm_mm))
+		return false;
+	if (!(vma->vm_flags & VM_NACC_APP) ||
+	    (vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP)))
+		return false;
+	if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE))
+		return false;
+	if (!vma_is_anonymous(vma))
+		return false;
+	if (end <= start)
+		return false;
+
+	protected_end = min_t(unsigned long, TASK_SIZE,
+			      NACC_USER_VPN2_PROTECTED_END);
+	return start < protected_end;
+}
+
 int
 mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 	       struct vm_area_struct *vma, struct vm_area_struct **pprev,
@@ -626,6 +651,13 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 	if (newflags == oldflags) {
 		*pprev = vma;
 		return 0;
+	}
+
+	if (nacc_mprotect_private_protnone_unsupported(vma, start, end,
+						       newflags)) {
+		nacc_debug_ratelimited("[Linux]: rejecting unsupported NaCC private PROT_NONE mprotect mm=%px range=[%lx,%lx) flags old=%lx new=%lx\n",
+				       mm, start, end, oldflags, newflags);
+		return -EACCES;
 	}
 
 	/*

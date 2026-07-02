@@ -544,15 +544,18 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 	}
 }
 
-void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr)
+void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr,
+			     unsigned long start_va,
+			     unsigned long root_pgd_pa)
 {
 	struct sbiret ret;
 
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_WRPROTECT_PTES, ptep_pa,
-			nr, 0, 0, 0, 0);
+			nr, start_va, root_pgd_pa, 0, 0);
 	if (ret.error) {
-		printk(KERN_ERR "[Linux]: nacc_wrprotect_ptes_sbi failed: ptep_pa=%lx nr=%u err=%ld val=%ld\n",
-		       ptep_pa, nr, ret.error, ret.value);
+		printk(KERN_ERR "[Linux]: nacc_wrprotect_ptes_sbi failed: ptep_pa=%lx nr=%u start_va=%lx root=%lx err=%ld val=%ld\n",
+		       ptep_pa, nr, start_va, root_pgd_pa, ret.error,
+		       ret.value);
 	}
 }
 
@@ -573,6 +576,22 @@ unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
 	}
 
 	return ret.value;
+}
+
+int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
+			 unsigned long pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECORD_VVAR,
+			root_pgd_pa, addr, pfn, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_record_vvar_sbi failed: root=%lx addr=%lx pfn=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, addr, pfn, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return 0;
 }
 
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)

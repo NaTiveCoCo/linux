@@ -671,7 +671,8 @@ static inline void ptep_set_wrprotect(struct mm_struct *mm,
 {
 #ifdef NACC
 	if (mm && nacc_is_secure_ptp_virt(ptep) && nacc_use_secure_pt(mm)) {
-		nacc_wrprotect_ptes_sbi(__pa(ptep), 1);
+		nacc_wrprotect_ptes_sbi(__pa(ptep), 1, address,
+					__pa(mm->pgd));
 		return;
 	}
 #endif

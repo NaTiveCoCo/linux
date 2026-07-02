@@ -1632,7 +1632,11 @@ static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
 		return false;
 	if (vma->vm_flags & (VM_SHARED | VM_MAYSHARE))
 		return false;
-	if (vma->vm_file)
+	/*
+	 * Private /dev/zero keeps vm_file after mmap_zero(), but vm_ops is
+	 * cleared and the VMA is a zero-source anonymous mapping for NaCC.
+	 */
+	if (vma->vm_file && !vma_is_anonymous(vma))
 		return false;
 
 	return true;
@@ -5097,8 +5101,9 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	if (pte_alloc(vma->vm_mm, vmf->pmd))
 		return VM_FAULT_OOM;
 
-	/* Use the zero-page for reads */
+	/* Use the zero-page for reads unless NaCC requires a private leaf. */
 	if (!(vmf->flags & FAULT_FLAG_WRITE) &&
+			!nacc_private_leaf &&
 			!mm_forbids_zeropage(vma->vm_mm)) {
 		entry = pte_mkspecial(pfn_pte(my_zero_pfn(vmf->address),
 						vma->vm_page_prot));

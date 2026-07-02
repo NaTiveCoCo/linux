@@ -204,11 +204,15 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr, unsigned long start_va,
 		       unsigned long root_pgd_pa);
-void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr);
+void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr,
+			     unsigned long start_va,
+			     unsigned long root_pgd_pa);
 unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
 				  unsigned long operand, unsigned long start_va,
 				  unsigned long root_pgd_pa,
 				  unsigned long flags);
+int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
+			 unsigned long pfn);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
 int nacc_acquire_private_pfn_sbi(unsigned long pfn);
