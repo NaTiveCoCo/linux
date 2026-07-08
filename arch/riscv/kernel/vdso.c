@@ -239,6 +239,9 @@ out_free:
 static int vdso_mremap(const struct vm_special_mapping *sm,
 		       struct vm_area_struct *new_vma)
 {
+	if (nacc_use_secure_pt(current->mm))
+		return -EPERM;
+
 	current->mm->context.vdso = (void *)new_vma->vm_start;
 
 	return 0;
