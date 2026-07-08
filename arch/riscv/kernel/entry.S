@@ -203,6 +203,19 @@ SYM_CODE_START(handle_exception)
 SYM_CODE_END(handle_exception)
 ASM_NOKPROBE(handle_exception)
 
+SYM_FUNC_START(nacc_exception_handler_from_cause)
+	slli a0, a0, RISCV_LGPTR
+	la t0, excp_vect_table
+	la t1, excp_vect_table_end
+	add a0, t0, a0
+	bgeu a0, t1, 1f
+	REG_L a0, 0(a0)
+	ret
+1:
+	la a0, do_trap_unknown
+	ret
+SYM_FUNC_END(nacc_exception_handler_from_cause)
+
 /*
  * The ret_from_exception must be called with interrupt disabled. Here is the
  * caller list:
@@ -427,7 +440,7 @@ SYM_FUNC_END(__switch_to)
 	.section ".rodata"
 	.align LGREG
 	/* Exception vector table */
-SYM_DATA_START(excp_vect_table)
+SYM_DATA_START_LOCAL(excp_vect_table)
 	RISCV_PTR do_trap_insn_misaligned
 	ALT_INSN_FAULT(RISCV_PTR do_trap_insn_fault)
 	RISCV_PTR do_trap_insn_illegal

@@ -12,8 +12,10 @@
 #include <linux/binfmts.h>
 #include <linux/err.h>
 #include <asm/page.h>
+#include <asm/pgtable.h>
 #include <asm/vdso.h>
 #include <asm/nacc.h>
+#include <asm/tlbflush.h>
 #include <linux/time_namespace.h>
 #include <vdso/datapage.h>
 #include <vdso/vsyscall.h>
@@ -60,6 +62,178 @@ bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma)
 #endif
 
 	return false;
+}
+
+static struct __vdso_info *nacc_vdso_info_for_text_vma(
+	const struct vm_area_struct *vma)
+{
+	if (!vma)
+		return NULL;
+
+	if (vma_is_special_mapping(vma, vdso_info.cm))
+		return &vdso_info;
+#ifdef CONFIG_COMPAT
+	if (vma_is_special_mapping(vma, compat_vdso_info.cm))
+		return &compat_vdso_info;
+#endif
+
+	return NULL;
+}
+
+bool nacc_vma_is_vdso_text(const struct vm_area_struct *vma)
+{
+	return !!nacc_vdso_info_for_text_vma(vma);
+}
+
+static int nacc_vdso_prepare_pte_slots(struct mm_struct *mm,
+				       unsigned long start,
+				       unsigned long nr_pages)
+{
+	for (unsigned long i = 0; i < nr_pages; i++) {
+		spinlock_t *ptl;
+		pte_t *ptep;
+
+		ptep = get_locked_pte(mm, start + i * PAGE_SIZE, &ptl);
+		if (!ptep)
+			return -ENOMEM;
+		pte_unmap_unlock(ptep, ptl);
+	}
+
+	return 0;
+}
+
+static void nacc_vdso_log_pte_slots(struct mm_struct *mm, unsigned long start,
+				    unsigned long nr_pages, const char *tag)
+{
+	for (unsigned long i = 0; i < nr_pages; i++) {
+		unsigned long addr = start + i * PAGE_SIZE;
+		spinlock_t *ptl;
+		pte_t *ptep;
+		pte_t pte;
+
+		ptep = get_locked_pte(mm, addr, &ptl);
+		if (!ptep) {
+			nacc_debug("[NACC][vdso-adopt] %s pid=%d comm=%s mm=%px addr=%lx pte_slot=missing\n",
+				   tag, current->pid, current->comm, mm, addr);
+			continue;
+		}
+
+		pte = ptep_get(ptep);
+		nacc_debug("[NACC][vdso-adopt] %s pid=%d comm=%s mm=%px addr=%lx pte=%lx pfn=%lx present=%d special=%d nacc=%d\n",
+			   tag, current->pid, current->comm, mm, addr, pte_val(pte),
+			   pte_pfn(pte), pte_present(pte), pte_special(pte),
+			   pte_nacc(pte));
+		pte_unmap_unlock(ptep, ptl);
+	}
+}
+
+static int nacc_vdso_adopt_fail(struct vm_area_struct *vma, int ret,
+				const char *reason, unsigned long nr_pages)
+{
+	struct mm_struct *mm = vma ? vma->vm_mm : NULL;
+
+	printk(KERN_ERR "[NACC][vdso-adopt] reject pid=%d comm=%s mm=%px root=%lx reason=%s ret=%d vma=%px start=%lx end=%lx flags=%lx context_vdso=%px nr_pages=%lu\n",
+	       current->pid, current->comm, mm, mm ? __pa(mm->pgd) : 0,
+	       reason, ret, vma, vma ? vma->vm_start : 0,
+	       vma ? vma->vm_end : 0, vma ? vma->vm_flags : 0,
+	       mm ? mm->context.vdso : NULL, nr_pages);
+
+	return ret;
+}
+
+int nacc_adopt_vdso_text(struct vm_area_struct *vma)
+{
+	struct __vdso_info *info;
+	struct mm_struct *mm;
+	unsigned long nr_pages;
+	unsigned long text_len;
+	unsigned long *source_pfns;
+	int ret = 0;
+
+	if (!vma || !vma->vm_mm)
+		return nacc_vdso_adopt_fail(vma, -EINVAL, "missing-vma-mm", 0);
+
+	mm = vma->vm_mm;
+	if (!nacc_use_secure_pt(mm))
+		return 0;
+
+	info = nacc_vdso_info_for_text_vma(vma);
+	if (!info || !info->cm || !info->cm->pages)
+		return nacc_vdso_adopt_fail(vma, -EINVAL, "not-vdso-text", 0);
+
+	nr_pages = info->vdso_pages;
+	if (!nr_pages || nr_pages > NACC_SEMANTIC_MAX_PFNS)
+		return nacc_vdso_adopt_fail(vma, -E2BIG, "bad-page-count",
+					    nr_pages);
+	if (nr_pages > (ULONG_MAX >> PAGE_SHIFT))
+		return nacc_vdso_adopt_fail(vma, -EOVERFLOW, "page-count-overflow",
+					    nr_pages);
+
+	nacc_debug("[NACC][vdso-adopt] enter pid=%d comm=%s mm=%px root=%lx vma=[%lx,%lx) flags=%lx context_vdso=%px nr_pages=%lu\n",
+		   current->pid, current->comm, mm, __pa(mm->pgd), vma->vm_start,
+		   vma->vm_end, vma->vm_flags, mm->context.vdso, nr_pages);
+
+	text_len = nr_pages << PAGE_SHIFT;
+	if (vma->vm_end - vma->vm_start != text_len)
+		return nacc_vdso_adopt_fail(vma, -EINVAL, "length-mismatch",
+					    nr_pages);
+	if (mm->context.vdso != (void *)vma->vm_start)
+		return nacc_vdso_adopt_fail(vma, -EINVAL, "context-vdso-mismatch",
+					    nr_pages);
+	if ((vma->vm_flags & (VM_READ | VM_EXEC)) != (VM_READ | VM_EXEC))
+		return nacc_vdso_adopt_fail(vma, -EACCES, "missing-rx",
+					    nr_pages);
+	if (vma->vm_flags & VM_WRITE)
+		return nacc_vdso_adopt_fail(vma, -EACCES, "writable-vdso",
+					    nr_pages);
+	if ((vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP)) != VM_MIXEDMAP)
+		return nacc_vdso_adopt_fail(vma, -EINVAL, "bad-pfnmap-mixedmap",
+					    nr_pages);
+
+	source_pfns = kcalloc(nr_pages, sizeof(*source_pfns), GFP_KERNEL);
+	if (!source_pfns)
+		return nacc_vdso_adopt_fail(vma, -ENOMEM, "source-pfn-alloc",
+					    nr_pages);
+
+	for (unsigned long i = 0; i < nr_pages; i++) {
+		if (!info->cm->pages[i]) {
+			ret = -EINVAL;
+			printk(KERN_ERR "[NACC][vdso-adopt] reject pid=%d comm=%s mm=%px root=%lx reason=missing-source-page index=%lu nr_pages=%lu\n",
+			       current->pid, current->comm, mm, __pa(mm->pgd),
+			       i, nr_pages);
+			goto out_free;
+		}
+		source_pfns[i] = page_to_pfn(info->cm->pages[i]);
+		nacc_debug("[NACC][vdso-adopt] source pid=%d comm=%s root=%lx index=%lu pfn=%lx\n",
+			   current->pid, current->comm, __pa(mm->pgd), i,
+			   source_pfns[i]);
+	}
+
+	ret = nacc_vdso_prepare_pte_slots(mm, vma->vm_start, nr_pages);
+	if (ret) {
+		printk(KERN_ERR "[NACC][vdso-adopt] reject pid=%d comm=%s mm=%px root=%lx reason=prepare-pte-slots ret=%d nr_pages=%lu\n",
+		       current->pid, current->comm, mm, __pa(mm->pgd), ret,
+		       nr_pages);
+		goto out_free;
+	}
+
+	nacc_vdso_log_pte_slots(mm, vma->vm_start, nr_pages, "before-sbi");
+
+	ret = nacc_adopt_vdso_sbi(__pa(mm->pgd), vma->vm_start, nr_pages,
+				  __pa(source_pfns));
+	nacc_debug("[NACC][vdso-adopt] sbi-return pid=%d comm=%s mm=%px root=%lx ret=%d\n",
+		   current->pid, current->comm, mm, __pa(mm->pgd), ret);
+	nacc_vdso_log_pte_slots(mm, vma->vm_start, nr_pages, "after-sbi");
+	if (!ret) {
+		flush_tlb_range(vma, vma->vm_start, vma->vm_end);
+		nacc_debug("[NACC][vdso-adopt] success pid=%d comm=%s mm=%px root=%lx vma=[%lx,%lx) nr_pages=%lu\n",
+			   current->pid, current->comm, mm, __pa(mm->pgd),
+			   vma->vm_start, vma->vm_end, nr_pages);
+	}
+
+out_free:
+	kfree(source_pfns);
+	return ret;
 }
 
 static int vdso_mremap(const struct vm_special_mapping *sm,
@@ -172,6 +346,47 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 	return vmf_insert_pfn(vma, vmf->address, pfn);
 }
 
+static vm_fault_t vdso_fault(const struct vm_special_mapping *sm,
+			     struct vm_area_struct *vma, struct vm_fault *vmf)
+{
+	pgoff_t pgoff;
+	struct page **pages;
+	int ret;
+
+	if (vma->vm_mm && nacc_use_secure_pt(vma->vm_mm)) {
+		nacc_debug("[NACC][vdso-fault] enter pid=%d comm=%s mm=%px root=%lx addr=%lx pgoff=%lx vma=[%lx,%lx) flags=%lx mixed=%d pfnmap=%d\n",
+			   current->pid, current->comm, vma->vm_mm,
+			   __pa(vma->vm_mm->pgd), vmf->address, vmf->pgoff,
+			   vma->vm_start, vma->vm_end, vma->vm_flags,
+			   !!(vma->vm_flags & VM_MIXEDMAP),
+			   !!(vma->vm_flags & VM_PFNMAP));
+		ret = nacc_adopt_vdso_text(vma);
+		if (ret) {
+			printk(KERN_ERR "[NACC][vdso-fault] return=SIGBUS pid=%d comm=%s mm=%px addr=%lx ret=%d flags=%lx\n",
+			       current->pid, current->comm, vma->vm_mm,
+			       vmf->address, ret, vma->vm_flags);
+			return VM_FAULT_SIGBUS;
+		}
+		flush_tlb_page(vma, vmf->address);
+		nacc_debug("[NACC][vdso-fault] return=NOPAGE pid=%d comm=%s mm=%px addr=%lx flags=%lx\n",
+			   current->pid, current->comm, vma->vm_mm, vmf->address,
+			   vma->vm_flags);
+		return VM_FAULT_NOPAGE;
+	}
+
+	pages = sm->pages;
+	for (pgoff = vmf->pgoff; pgoff && *pages; ++pages)
+		pgoff--;
+
+	if (*pages) {
+		get_page(*pages);
+		vmf->page = *pages;
+		return 0;
+	}
+
+	return VM_FAULT_SIGBUS;
+}
+
 static struct vm_special_mapping rv_vdso_maps[] __ro_after_init = {
 	[RV_VDSO_MAP_VVAR] = {
 		.name   = "[vvar]",
@@ -179,6 +394,7 @@ static struct vm_special_mapping rv_vdso_maps[] __ro_after_init = {
 	},
 	[RV_VDSO_MAP_VDSO] = {
 		.name   = "[vdso]",
+		.fault = vdso_fault,
 		.mremap = vdso_mremap,
 	},
 };
@@ -199,6 +415,7 @@ static struct vm_special_mapping rv_compat_vdso_maps[] __ro_after_init = {
 	},
 	[RV_VDSO_MAP_VDSO] = {
 		.name   = "[vdso]",
+		.fault = vdso_fault,
 		.mremap = vdso_mremap,
 	},
 };

@@ -296,7 +296,8 @@
 #define CSR_STVAL		0x143
 #define CSR_SIP			0x144
 
-#define CSR_NACC_SSTATUS    0x147
+#define CSR_TRAMPOLINE		0x146
+#define CSR_NACC_STATE		0x3f0
 
 #define CSR_SATP		0x180
 

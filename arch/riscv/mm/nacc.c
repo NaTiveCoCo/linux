@@ -586,6 +586,8 @@ struct nacc_leaf_detach_stats {
 	unsigned long resident_skipped_ptes;
 	unsigned long already_nacc_ptes;
 	unsigned long special_ptes;
+	unsigned long vdso_text_vmas;
+	unsigned long vdso_text_adopted;
 	unsigned long non_user_ptes;
 	unsigned long empty_ptes;
 };
@@ -622,6 +624,41 @@ static int nacc_detach_pre_vma(unsigned long start, unsigned long end,
 
 	if (walk->vma) {
 		stats->vmas++;
+		if (nacc_vma_is_vdso_text(walk->vma)) {
+			bool had_mixedmap;
+			unsigned long flags_before;
+			int ret;
+
+			stats->vdso_text_vmas++;
+			if (walk->vma->vm_flags & VM_PFNMAP)
+				return -EINVAL;
+			flags_before = walk->vma->vm_flags;
+			had_mixedmap = walk->vma->vm_flags & VM_MIXEDMAP;
+			nacc_debug("[NACC][vdso-detach] enter pid=%d comm=%s mm=%px root=%lx vma=[%lx,%lx) flags=%lx had_mixedmap=%d\n",
+				   current->pid, current->comm, walk->mm,
+				   walk->mm ? __pa(walk->mm->pgd) : 0,
+				   walk->vma->vm_start, walk->vma->vm_end,
+				   flags_before, had_mixedmap);
+			if (!had_mixedmap)
+				vm_flags_set(walk->vma, VM_MIXEDMAP);
+			ret = nacc_adopt_vdso_text(walk->vma);
+			nacc_debug("[NACC][vdso-detach] adopt-return pid=%d comm=%s mm=%px root=%lx vma=[%lx,%lx) flags_before=%lx flags_after=%lx ret=%d\n",
+				   current->pid, current->comm, walk->mm,
+				   walk->mm ? __pa(walk->mm->pgd) : 0,
+				   walk->vma->vm_start, walk->vma->vm_end,
+				   flags_before, walk->vma->vm_flags, ret);
+			if (ret) {
+				if (!had_mixedmap)
+					vm_flags_clear(walk->vma, VM_MIXEDMAP);
+				nacc_debug("[NACC][vdso-detach] rollback pid=%d comm=%s mm=%px root=%lx vma=[%lx,%lx) flags_now=%lx ret=%d\n",
+					   current->pid, current->comm, walk->mm,
+					   walk->mm ? __pa(walk->mm->pgd) : 0,
+					   walk->vma->vm_start, walk->vma->vm_end,
+					   walk->vma->vm_flags, ret);
+				return ret;
+			}
+			stats->vdso_text_adopted++;
+		}
 		if (nacc_vma_private_anon_hint(walk->vma)) {
 			vm_flags_set(walk->vma, VM_NACC_APP);
 			stats->private_hint_vmas++;
@@ -702,6 +739,8 @@ int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag)
 		   stats.resident_ptes, stats.resident_skipped_ptes,
 		   stats.already_nacc_ptes, stats.special_ptes,
 		   stats.non_user_ptes, stats.empty_ptes);
+	nacc_debug("[Linux]: nacc_detach_user_leaf_pages vdso tag=%s mm=%px vdso_text_vmas=%lu vdso_text_adopted=%lu\n",
+		   tag, mm, stats.vdso_text_vmas, stats.vdso_text_adopted);
 
 	return ret;
 }

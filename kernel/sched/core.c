@@ -5304,6 +5304,12 @@ struct sbiret sbi_ecall(int ext, int fid, unsigned long arg0,
 
 	return ret;
 }
+
+static void nacc_sched_verify(unsigned long prev_pid, unsigned long next_pid)
+{
+	sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, prev_pid, next_pid,
+		  0, 0, 0, 0);
+}
 #endif
 
 /*
@@ -5342,7 +5348,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
 				nacc_debug("nacc: context_switch from user to kernel\n");
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, 0, 0, 0, 0, 0);
+                nacc_sched_verify((unsigned long) prev->pid, 0);
             }
 #endif
             mmgrab_lazy_tlb(prev->active_mm);
@@ -5370,7 +5376,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, 0, (unsigned long) next->pid, 0, 0, 0, 0);
+                nacc_sched_verify(0, (unsigned long) next->pid);
             }
 #endif
         } else {
@@ -5378,13 +5384,14 @@ context_switch(struct rq *rq, struct task_struct *prev,
             /* if next task_struct is nacc process */
             if (next->thread.nacc_flag && prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, (unsigned long) next->pid, 0, 0, 0, 0);
+                nacc_sched_verify((unsigned long) prev->pid,
+                                  (unsigned long) next->pid);
             } else if (next->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, 0, (unsigned long) next->pid, 0, 0, 0, 0);
+                nacc_sched_verify(0, (unsigned long) next->pid);
             } else if (prev->thread.nacc_flag) {
                 /* Send info to the sbi to be verified */
-                sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_VERIFY, (unsigned long) prev->pid, 0, 0, 0, 0, 0);
+                nacc_sched_verify((unsigned long) prev->pid, 0);
             }
 #endif
         }

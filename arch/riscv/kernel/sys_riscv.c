@@ -28,8 +28,9 @@
 #define NACC_AGENT_MEM_SIZE        0x20000000
 #define NACC_AGENT_SLOT_SIZE       0x40000000UL
 #define NACC_AGENT_TOP_GAP         0x100000000UL
-extern char do_irq[];
-extern char excp_vect_table[];
+extern void nacc_delegate_entry(struct pt_regs *regs,
+				unsigned long kind,
+				unsigned long cause);
 
 static unsigned long nacc_fixed_agent_base(void)
 {
@@ -234,8 +235,8 @@ static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
     asm volatile("mv %0, gp" : "=r"(current_gp));
 
     sbi_ecall(SBI_EXT_NACC, sbi_fid, virt_agent, pid, (unsigned long) regs,
-              (unsigned long) do_irq, (unsigned long) excp_vect_table,
-              current_gp);
+              (unsigned long) nacc_delegate_entry,
+              current_gp, 0);
 }
 
 
@@ -588,6 +589,23 @@ int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
 	if (ret.error) {
 		printk(KERN_ERR "[Linux]: nacc_record_vvar_sbi failed: root=%lx addr=%lx pfn=%lx err=%ld val=%ld\n",
 		       root_pgd_pa, addr, pfn, ret.error, ret.value);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+int nacc_adopt_vdso_sbi(unsigned long root_pgd_pa, unsigned long addr,
+			unsigned long nr_pages, unsigned long source_pfns_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_ADOPT_VDSO,
+			root_pgd_pa, addr, nr_pages, source_pfns_pa, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_adopt_vdso_sbi failed: root=%lx addr=%lx nr_pages=%lx pfns_pa=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, addr, nr_pages, source_pfns_pa,
+		       ret.error, ret.value);
 		return -EIO;
 	}
 

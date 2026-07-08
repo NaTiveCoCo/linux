@@ -1419,6 +1419,11 @@ vma_needs_copy(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma)
 	if (userfaultfd_wp(dst_vma))
 		return true;
 
+	/* NaCC VDSO text is adopted and sealed per root; do not inherit it. */
+	if (nacc_vma_is_vdso_text(src_vma) &&
+	    nacc_use_secure_pt(src_vma->vm_mm))
+		return false;
+
 	if (src_vma->vm_flags & (VM_PFNMAP | VM_MIXEDMAP))
 		return true;
 

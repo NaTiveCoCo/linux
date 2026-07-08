@@ -88,6 +88,8 @@ struct nacc_uaccess_string_read_desc {
 #define NACC_USER_VPN2_PROTECTED_END \
 	(NACC_USER_VPN2_PROTECTED_SLOTS * NACC_USER_VPN2_SLOT_SIZE)
 
+#define NACC_SEMANTIC_MAX_PFNS	16UL
+
 enum nacc_update_pte_op {
 	NACC_UPDATE_PTE_XCHG_ONE = 1,
 	NACC_UPDATE_PTE_TEST_CLEAR_YOUNG_ONE = 2,
@@ -189,11 +191,23 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag);
 void pgtbl_debug(unsigned long pgd);
 #ifdef CONFIG_MMU
 bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma);
+bool nacc_vma_is_vdso_text(const struct vm_area_struct *vma);
+int nacc_adopt_vdso_text(struct vm_area_struct *vma);
 #else
 static inline bool nacc_vma_is_vvar_abi_data(const struct vm_area_struct *vma)
 {
 	(void)vma;
 	return false;
+}
+static inline bool nacc_vma_is_vdso_text(const struct vm_area_struct *vma)
+{
+	(void)vma;
+	return false;
+}
+static inline int nacc_adopt_vdso_text(struct vm_area_struct *vma)
+{
+	(void)vma;
+	return 0;
 }
 #endif
 
@@ -213,6 +227,8 @@ unsigned long nacc_update_pte_sbi(unsigned long op, unsigned long ptep_pa,
 				  unsigned long flags);
 int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
 			 unsigned long pfn);
+int nacc_adopt_vdso_sbi(unsigned long root_pgd_pa, unsigned long addr,
+			unsigned long nr_pages, unsigned long source_pfns_pa);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
 int nacc_acquire_private_pfn_sbi(unsigned long pfn);

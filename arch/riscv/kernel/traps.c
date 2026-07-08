@@ -38,11 +38,52 @@ int show_unhandled_signals = 1;
 
 static DEFINE_SPINLOCK(die_lock);
 
-#define nacc_aret_to_agent(regs) do {					\
-	csr_write(CSR_NACC_SSTATUS, (regs)->status);			\
-	__asm__ volatile ("mv a0, %0\n\t.word 0x1020000b"		\
-			  : : "r" ((unsigned long)(regs)) : "a0", "memory"); \
-} while (0)
+typedef void (*nacc_delegate_handler_t)(struct pt_regs *regs);
+extern nacc_delegate_handler_t
+nacc_exception_handler_from_cause(unsigned long cause);
+
+enum nacc_delegate_kind {
+	NACC_DELEGATE_IRQ = 1,
+	NACC_DELEGATE_EXCEPTION = 2,
+};
+
+static inline void nacc_aret_to_agent(struct pt_regs *regs)
+{
+	local_irq_disable();
+	__asm__ volatile ("mv a0, %0\n\t.word 0x1020000b"
+			  : : "r" ((unsigned long)regs) : "a0", "memory");
+}
+
+asmlinkage __visible void nacc_delegate_entry(struct pt_regs *regs,
+					      unsigned long kind,
+					      unsigned long cause)
+{
+	nacc_delegate_handler_t handler;
+
+	if (kind == NACC_DELEGATE_IRQ) {
+		do_irq(regs);
+	} else if (kind == NACC_DELEGATE_EXCEPTION) {
+		handler = nacc_exception_handler_from_cause(cause);
+		if (!handler)
+			panic("NaCC delegate exception without handler cause=%lx",
+			      cause);
+		handler(regs);
+	} else {
+		panic("NaCC delegate entry with invalid kind=%lu cause=%lx",
+		      kind, cause);
+	}
+
+	/*
+	 * Agent-delegated user traps return through this wrapper.  The Linux
+	 * handlers above keep normal C return semantics.
+	 */
+	if (current->thread.nacc_flag & NACC_INITED) {
+		if (user_mode(regs))
+			nacc_aret_to_agent(regs);
+	}
+
+	panic("NaCC delegate entry returned without aret");
+}
 
 static int copy_code(struct pt_regs *regs, u16 *val, const u16 *insns)
 {
@@ -386,16 +427,10 @@ void do_trap_ecall_u(struct pt_regs *regs)
 		irqentry_nmi_exit(regs, state);
 	}
 
-	if (current->thread.nacc_flag & NACC_INITED) {
-		nacc_debug("[Linux]: Back to 'do_trap_ecall_u' pid=%d comm=%s cid=%lx regs=%lx\n",
+	if (current->thread.nacc_flag & NACC_INITED)
+		nacc_debug("[Linux]: Back to 'do_trap_ecall_u' pid=%d comm=%s cid=%lx regs=%lx status=%lx epc=%lx\n",
 			   current->pid, current->comm, current->thread.nacc_cid,
-			   (unsigned long)regs);
-		nacc_debug("[Linux]: regs->sstatus: %lx\n", regs->status);
-		nacc_debug("[Linux]: regs->epc: %lx\n", regs->epc);
-		// 0001000    00010 00000 000 00000 0001011
-		// acall logic should be modified.
-		nacc_aret_to_agent(regs);
-	}
+			   (unsigned long)regs, regs->status, regs->epc);
 }
 
 #ifdef CONFIG_MMU
@@ -450,14 +485,11 @@ asmlinkage __visible noinstr void do_page_fault(struct pt_regs *regs)
 
 	irqentry_exit(regs, state);
 
-    if (current->thread.nacc_flag & NACC_INITED) {
-        nacc_debug("[Linux]: Back to 'do_page_fault' in kernel. With regs: %lx\n", (unsigned long)regs);
+	if (current->thread.nacc_flag & NACC_INITED) {
+		nacc_debug("[Linux]: Back to 'do_page_fault'. With regs: %lx\n", (unsigned long)regs);
 		nacc_debug("[Linux]: regs->sstatus: %lx\n", regs->status);
 		nacc_debug("[Linux]: regs->epc: %lx\n", regs->epc);
-        // 0001000    00010 00000 000 00000 0001011
-        // acall logic should be modified.
-        nacc_aret_to_agent(regs);
-    }
+	}
 }
 #endif
 
@@ -489,8 +521,6 @@ asmlinkage void noinstr do_irq(struct pt_regs *regs)
 			   (unsigned long)regs, regs->status, regs->epc, regs->ra,
 			   regs->sp, regs->a0, regs->a2, regs->a4, regs->a5,
 			   regs->cause);
-		// 0001000    00010 00000 000 00000 0001011
-		nacc_aret_to_agent(regs);
 	}
 }
 
