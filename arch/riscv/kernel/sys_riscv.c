@@ -592,6 +592,8 @@ int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
 		return -EIO;
 	}
 
+	nacc_debug("[Linux]: nacc_record_vvar_sbi ok: root=%lx addr=%lx pfn=%lx val=%ld\n",
+		   root_pgd_pa, addr, pfn, ret.value);
 	return 0;
 }
 

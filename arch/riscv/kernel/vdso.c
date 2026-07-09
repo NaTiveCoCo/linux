@@ -316,6 +316,9 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 {
 	struct page *timens_page = find_timens_vvar_page(vma);
 	unsigned long pfn;
+	bool secure;
+	vm_fault_t fault;
+	int ret;
 
 	switch (vmf->pgoff) {
 	case VVAR_DATA_PAGE_OFFSET:
@@ -342,11 +345,29 @@ static vm_fault_t vvar_fault(const struct vm_special_mapping *sm,
 		return VM_FAULT_SIGBUS;
 	}
 
-	if (vma->vm_mm && nacc_use_secure_pt(vma->vm_mm) &&
-	    nacc_record_vvar_sbi(__pa(vma->vm_mm->pgd), vmf->address, pfn))
-		return VM_FAULT_SIGBUS;
+	secure = vma->vm_mm && nacc_use_secure_pt(vma->vm_mm);
+	nacc_debug("[NACC][vvar-fault] enter pid=%d comm=%s mm=%px root=%lx addr=%lx pgoff=%lx pfn=%lx vma=[%lx,%lx) flags=%lx secure=%d timens=%d\n",
+		   current->pid, current->comm, vma->vm_mm,
+		   vma->vm_mm ? __pa(vma->vm_mm->pgd) : 0, vmf->address,
+		   vmf->pgoff, pfn, vma->vm_start, vma->vm_end,
+		   vma->vm_flags, secure, !!timens_page);
 
-	return vmf_insert_pfn(vma, vmf->address, pfn);
+	if (secure) {
+		ret = nacc_record_vvar_sbi(__pa(vma->vm_mm->pgd),
+					   vmf->address, pfn);
+		nacc_debug("[NACC][vvar-fault] record pid=%d comm=%s root=%lx addr=%lx pfn=%lx ret=%d\n",
+			   current->pid, current->comm, __pa(vma->vm_mm->pgd),
+			   vmf->address, pfn, ret);
+		if (ret)
+			return VM_FAULT_SIGBUS;
+	}
+
+	fault = vmf_insert_pfn(vma, vmf->address, pfn);
+	nacc_debug("[NACC][vvar-fault] insert pid=%d comm=%s root=%lx addr=%lx pfn=%lx fault=%x\n",
+		   current->pid, current->comm,
+		   vma->vm_mm ? __pa(vma->vm_mm->pgd) : 0, vmf->address, pfn,
+		   fault);
+	return fault;
 }
 
 static vm_fault_t vdso_fault(const struct vm_special_mapping *sm,
