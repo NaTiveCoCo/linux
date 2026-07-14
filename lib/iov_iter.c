@@ -13,6 +13,11 @@
 #include <linux/instrumented.h>
 #include <linux/iov_iter.h>
 
+#if defined(CONFIG_RISCV) && defined(NACC)
+#include <linux/instruction_pointer.h>
+#include <asm/nacc.h>
+#endif
+
 static __always_inline
 size_t copy_to_user_iter(void __user *iter_to, size_t progress,
 			 size_t len, void *from, void *priv2)
@@ -62,6 +67,21 @@ static __always_inline
 size_t memcpy_to_iter(void *iter_to, size_t progress,
 		      size_t len, void *from, void *priv2)
 {
+#if defined(CONFIG_RISCV) && defined(NACC)
+	if (nacc_private_data_uaccess_active()) {
+		size_t left = len;
+		int ret;
+
+		ret = nacc_private_data_copy_kernel_alias(
+			(unsigned long)iter_to,
+			(unsigned long)((char *)from + progress), len,
+			_RET_IP_, &left);
+		if (ret > 0)
+			return left;
+		if (ret < 0)
+			return len;
+	}
+#endif
 	memcpy(iter_to, from + progress, len);
 	return 0;
 }

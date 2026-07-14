@@ -266,6 +266,11 @@ int nacc_private_data_copy_from_user(unsigned long kernel_va,
 				     unsigned long bytes,
 				     unsigned long caller_pc,
 				     unsigned long *left);
+int nacc_private_data_copy_kernel_alias(unsigned long destination_kernel_va,
+					unsigned long source_kernel_va,
+					unsigned long bytes,
+					unsigned long caller_pc,
+					unsigned long *left);
 int nacc_private_data_clear_user(unsigned long user_va,
 				 unsigned long bytes,
 				 unsigned long caller_pc,
