@@ -200,8 +200,6 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 
 		token = pmd_pgtable(*pmd);
 		token_pfn = page_to_pfn(token);
-		if (nacc_pfn_is_secure_ptp(token_pfn))
-			nacc_track_secure_ptp_pfn(token_pfn);
 		if (nacc_pfn_is_secure_ptp(virt_to_pfn(pmd)) &&
 		    nacc_use_secure_pt(tlb->mm))
 			nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
@@ -209,6 +207,9 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 					    __pa(tlb->mm->pgd), 0);
 		else
 			pmd_clear(pmd);
+		/* Publish the unlink before a full reclaim queue returns the child. */
+		if (nacc_pfn_is_secure_ptp(token_pfn))
+			smp_wmb();
 		nacc_debug("free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n",
 			   (unsigned long)pmd, pmd_val(*pmd),
 			   __page_val_to_pfn(pmd_val(*pmd)));
@@ -218,6 +219,7 @@ static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			nacc_reclaim_ptp_dtor(page_ptdesc(token),
 					      token_pfn, 0,
 					      "free_pte_range");
+			nacc_track_secure_ptp_pfn(token_pfn);
 		} else {
 			/* Old buddy page: normal buddy free */
 			pte_free_tlb(tlb, token, addr);
