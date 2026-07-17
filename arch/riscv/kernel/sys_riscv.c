@@ -545,6 +545,22 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 	}
 }
 
+int nacc_populate_ptp_sbi(unsigned long ptep_pa, unsigned long pteval,
+			  unsigned long root_pgd_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_POPULATE_PTP,
+			ptep_pa, pteval, root_pgd_pa, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_populate_ptp_sbi failed: ptep_pa=%lx pteval=%lx root=%lx err=%ld val=%ld\n",
+		       ptep_pa, pteval, root_pgd_pa, ret.error,
+		       ret.value);
+	}
+
+	return ret.error;
+}
+
 void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr,
 			     unsigned long start_va,
 			     unsigned long root_pgd_pa)

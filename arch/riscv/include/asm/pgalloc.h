@@ -42,8 +42,8 @@ static inline void pmd_populate(struct mm_struct *mm,
 
 	if (mm && nacc_pfn_is_secure_ptp(virt_to_pfn(pmd)) &&
 	    nacc_use_secure_pt(mm)) {
-		nacc_set_ptes_sbi(__pa(pmd), pmd_val(new_pmd), 1, 0,
-				  __pa(mm->pgd));
+		nacc_populate_ptp_sbi(__pa(pmd), pmd_val(new_pmd),
+				      __pa(mm->pgd));
 		return;
 	}
 
@@ -54,8 +54,18 @@ static inline void pmd_populate(struct mm_struct *mm,
 static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 {
 	unsigned long pfn = virt_to_pfn(pmd);
+	pud_t new_pud = __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE);
 
-	set_pud(pud, __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE));
+	if (mm && nacc_use_secure_pt(mm) &&
+	    (nacc_pfn_is_secure_ptp(virt_to_pfn(pud)) ||
+	     (nacc_mm_root_tagged(mm) &&
+	      virt_to_pfn(pud) == virt_to_pfn(mm->pgd)))) {
+		nacc_populate_ptp_sbi(__pa(pud), pud_val(new_pud),
+				      __pa(mm->pgd));
+		return;
+	}
+
+	set_pud(pud, new_pud);
 }
 
 static inline void p4d_populate(struct mm_struct *mm, p4d_t *p4d, pud_t *pud)
