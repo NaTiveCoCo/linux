@@ -8,7 +8,6 @@
 #include <linux/pagemap.h>
 #include <linux/pagewalk.h>
 #include <linux/page_ref.h>
-#include <linux/percpu.h>
 #include <linux/seq_file.h>
 #include <linux/string.h>
 #include <asm/nacc.h>
@@ -444,8 +443,6 @@ static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
 {
        return READ_ONCE(*(unsigned long *)&ptdesc->ptl);
 }
-
-DEFINE_PER_CPU_PAGE_ALIGNED(struct nacc_reclaim_list, nacc_reclaim_list);
 
 unsigned long nacc_mm_state(struct mm_struct *mm)
 {
@@ -1326,44 +1323,6 @@ int nacc_private_data_clear_user(unsigned long user_va,
 	return 1;
 }
 EXPORT_SYMBOL(nacc_private_data_clear_user);
-
-void add_to_reclaim_list(unsigned long pfn)
-{
-    if (pfn < NACC_PTP_PFN_BASE || pfn >= NACC_PTP_PFN_END) {
-        return;
-    }
-    
-	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
-	reclaim_list->pfns[reclaim_list->count++] = pfn;
-	nacc_profile_secure_ptp_queue(1);
-    nacc_debug("[Linux]: add pfn: %lx to reclaim list, count: %lx\n",
-               reclaim_list->pfns[reclaim_list->count - 1],
-               reclaim_list->count);
-    // when it meets the max size, flush it.
-	if (reclaim_list->count == NACC_RECLAIM_LIST_SIZE) {
-		flush_reclaim_list();
-	}
-	put_cpu_var(reclaim_list);
-}
-
-void flush_reclaim_list(void)
-{
-    // After the full transfer function, flush_reclaim_list function should be called.
-	struct nacc_reclaim_list *reclaim_list = &get_cpu_var(nacc_reclaim_list);
-	if (reclaim_list->count > 0) {
-		unsigned long count = reclaim_list->count;
-
-        for (int i = 0; i < reclaim_list->count; i++)
-            nacc_debug("[Linux]: calling flush_reclaim_list with pfn: %lx\n",
-                       reclaim_list->pfns[i]);
-        sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_PTP,
-				  __pa(reclaim_list->pfns), reclaim_list->count,
-				  0, 0, 0, 0);
-		nacc_profile_secure_ptp_flush(count);
-		reclaim_list->count = 0;
-	}
-	put_cpu_var(reclaim_list);
-}
 
 void pgtbl_debug(unsigned long pgd)
 {

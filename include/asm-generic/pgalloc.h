@@ -11,17 +11,17 @@
 #include <asm/nacc.h>
 #include <asm/sbi.h>
 
-static inline bool nacc_free_secure_ptdesc(struct ptdesc *ptdesc,
-					       unsigned int level,
-					       const char *tag)
+static inline bool nacc_cancel_fresh_ptdesc(struct ptdesc *ptdesc,
+					    unsigned int level,
+					    const char *tag)
 {
 	unsigned long pfn = page_to_pfn(ptdesc_page(ptdesc));
 
 	if (!nacc_pfn_is_secure_ptp(pfn))
 		return false;
 
-	nacc_track_secure_ptp_pfn(pfn);
 	nacc_reclaim_ptp_dtor(ptdesc, pfn, level, tag);
+	nacc_cancel_ptp_sbi(pfn);
 	return true;
 }
 #endif /* NACC */
@@ -89,21 +89,14 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 
 #ifdef NACC
 	if (mm && nacc_use_secure_pt(mm)) {
-		unsigned long *new_pte_pfn_buf =
-			kmalloc(sizeof(unsigned long), GFP_KERNEL);
-
-		if (!new_pte_pfn_buf)
+		if (nacc_request_ptp_sbi(&new_pte_pfn))
 			return NULL;
-
-		nacc_debug("[__pte_alloc] request pmd for address space, position: %lx\n",
-			   (unsigned long)virt_to_phys(new_pte_pfn_buf));
-		sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP,
-			  virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
-		new_pte_pfn = (*new_pte_pfn_buf) >> 12;
-		kfree(new_pte_pfn_buf);
-		nacc_debug("[__pte_alloc] new_pmd_pfn = %lx\n", new_pte_pfn);
-		if (page_nacc_register_ptp(new_pte_pfn, 0))
+		nacc_debug("[__pte_alloc] admitted fresh PTE PTP pfn=%lx\n",
+			   new_pte_pfn);
+		if (page_nacc_register_ptp(new_pte_pfn, 0)) {
+			nacc_cancel_ptp_sbi(new_pte_pfn);
 			return NULL;
+		}
 		ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
 		return ptdesc_page(ptdesc);
 	}
@@ -152,7 +145,7 @@ static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 	struct ptdesc *ptdesc = page_ptdesc(pte_page);
 
 #ifdef NACC
-	if (nacc_free_secure_ptdesc(ptdesc, 0, "pte_free"))
+	if (nacc_cancel_fresh_ptdesc(ptdesc, 0, "pte_free"))
 		return;
 #endif
 	pagetable_pte_dtor(ptdesc);
@@ -186,22 +179,14 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 #ifdef NACC
 	if (mm && nacc_use_secure_pt(mm)) {
 		if (addr < 0x4000000000) {
-			unsigned long *new_pte_pfn_buf =
-				kmalloc(sizeof(unsigned long), GFP_KERNEL);
-
-			if (!new_pte_pfn_buf)
+			if (nacc_request_ptp_sbi(&new_pmd_pfn))
 				return NULL;
-
-			nacc_debug("[__pmd_alloc] request pmd for address space, position: %lx\n",
-				   (unsigned long)virt_to_phys(new_pte_pfn_buf));
-			sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP,
-				  virt_to_phys(new_pte_pfn_buf), 0, 0, 0, 0, 0);
-			new_pmd_pfn = (*new_pte_pfn_buf) >> 12;
-			kfree(new_pte_pfn_buf);
-			nacc_debug("[__pmd_alloc] new_pmd_pfn = %lx\n",
+			nacc_debug("[__pmd_alloc] admitted fresh PMD PTP pfn=%lx\n",
 				   new_pmd_pfn);
-			if (page_nacc_register_ptp(new_pmd_pfn, 1))
+			if (page_nacc_register_ptp(new_pmd_pfn, 1)) {
+				nacc_cancel_ptp_sbi(new_pmd_pfn);
 				return NULL;
+			}
 			ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
 			return ptdesc_address(ptdesc);
 		}
@@ -228,7 +213,7 @@ static inline void pmd_free(struct mm_struct *mm, pmd_t *pmd)
 
 	BUG_ON((unsigned long)pmd & (PAGE_SIZE-1));
 #ifdef NACC
-	if (nacc_free_secure_ptdesc(ptdesc, 1, "pmd_free"))
+	if (nacc_cancel_fresh_ptdesc(ptdesc, 1, "pmd_free"))
 		return;
 #endif
 	pagetable_pmd_dtor(ptdesc);

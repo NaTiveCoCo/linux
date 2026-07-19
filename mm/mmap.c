@@ -1998,7 +1998,6 @@ void exit_mmap(struct mm_struct *mm)
 	free_pgtables(&tlb, &vmi.mas, vma, FIRST_USER_ADDRESS,
 		      USER_PGTABLES_CEILING, true);
     if (nacc_mm_is_active(mm)) {
-        flush_reclaim_list();
         pgtbl_debug(virt_to_phys(mm->pgd));
     }
     tlb_finish_mmu(&tlb);
@@ -2446,16 +2445,6 @@ int relocate_vma_down(struct vm_area_struct *vma, unsigned long shift)
 			next ? next->vm_start : USER_PGTABLES_CEILING);
 	}
 	tlb_finish_mmu(&tlb);
-	if (nacc_mm_is_active(mm)) {
-		/*
-		 * Stack relocation can retire old secure PTE/PMD pages well before
-		 * exit_mmap(). Flush the reclaim list here so the temporary-stack
-		 * leftovers return to OpenSBI promptly instead of lingering until
-		 * process teardown or list saturation.
-		 */
-		flush_reclaim_list();
-	}
-
 	vma_prev(&vmi);
 	/* Shrink the vma to just the new range */
 	return vma_shrink(&vmi, vma, new_start, new_end, vma->vm_pgoff);

@@ -25,19 +25,16 @@
 #define NACC_BASE_MAPPINGS 0x17ff00000
 #define NACC_MAPPINGS_SIZE 0x100000
 
-#define NACC_AGENT_MEM_SIZE        0x20000000
-#define NACC_AGENT_SLOT_SIZE       0x40000000UL
-#define NACC_AGENT_TOP_GAP         0x100000000UL
 extern void nacc_delegate_entry(struct pt_regs *regs,
 				unsigned long kind,
 				unsigned long cause);
 
 static unsigned long nacc_fixed_agent_base(void)
 {
-    if (TASK_SIZE <= NACC_AGENT_SLOT_SIZE + NACC_AGENT_TOP_GAP)
+    if (TASK_SIZE < NACC_AGENT_VA_SLOT_END)
         return 0;
 
-    return TASK_SIZE - NACC_AGENT_TOP_GAP - NACC_AGENT_SLOT_SIZE;
+    return NACC_AGENT_VA_BASE;
 }
 
 static void nacc_activate_current_mm(const char *tag)
@@ -108,7 +105,7 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
     int ret;
 
     virt_agent = nacc_fixed_agent_base();
-    virt_end = virt_agent + NACC_AGENT_SLOT_SIZE;
+    virt_end = virt_agent + NACC_AGENT_VA_SLOT_SIZE;
     if (!virt_agent || virt_end > TASK_SIZE) {
         printk(KERN_ERR "[Linux]: invalid fixed NACC agent slot (%s): [%lx, %lx) task_size=%lx\n",
                tag, virt_agent, virt_end, TASK_SIZE);
@@ -146,7 +143,7 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 
     /*
      * Reserve one full SV39 VPN[2] slot (1 GiB). OpenSBI will only map the
-     * first NACC_AGENT_MEM_SIZE bytes with actual agent PTEs; the rest stays
+     * first NACC_AGENT_LINEAR_SIZE bytes with actual agent PTEs; the rest stays
      * as guard hole so ELF/mmap do not share the same top-level slot.
      */
     vm_flags_init(vma, VM_PFNMAP | VM_IO | VM_DONTEXPAND | VM_DONTDUMP | VM_NACC);
@@ -165,7 +162,7 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 
     nacc_debug("[Linux]: reserved fixed NACC agent slot (%s): [%lx, %lx), active agent range [%lx, %lx), mm state unchanged=%lx\n",
                tag, virt_agent, virt_end, virt_agent,
-               virt_agent + NACC_AGENT_MEM_SIZE, nacc_mm_state(mm));
+               virt_agent + NACC_AGENT_LINEAR_SIZE, nacc_mm_state(mm));
 
     return 0;
 }
@@ -178,7 +175,7 @@ static int nacc_insert_agent_vma(unsigned long *virt_agent_out,
     struct vm_area_struct *slot;
 
     virt_agent = nacc_fixed_agent_base();
-    slot_end = virt_agent + NACC_AGENT_SLOT_SIZE;
+    slot_end = virt_agent + NACC_AGENT_VA_SLOT_SIZE;
     if (!virt_agent || slot_end > TASK_SIZE)
         return -EINVAL;
 
@@ -545,20 +542,146 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 	}
 }
 
-int nacc_populate_ptp_sbi(unsigned long ptep_pa, unsigned long pteval,
-			  unsigned long root_pgd_pa)
+#define NACC_SBI_ENOSPC	(-1003L)
+#define NACC_SBI_ENOMEM	(-1004L)
+
+int nacc_request_ptp_sbi(unsigned long *pfn_out)
+{
+	struct sbiret ret;
+
+	if (!pfn_out)
+		return -EINVAL;
+	*pfn_out = 0;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_LINUX_REQ_PTP,
+			0, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		if (ret.error == NACC_SBI_ENOSPC ||
+		    ret.error == NACC_SBI_ENOMEM)
+			return -ENOMEM;
+		printk(KERN_ERR "[Linux]: unexpected REQ_PTP failure: err=%ld val=%ld\n",
+		       ret.error, ret.value);
+		panic("NaCC Secure PTP request protocol failure");
+	}
+	if (!nacc_pfn_is_secure_ptp(ret.value)) {
+		printk(KERN_ERR "[Linux]: REQ_PTP returned invalid PFN: pfn=%lx\n",
+		       ret.value);
+		panic("NaCC Secure PTP request returned invalid PFN");
+	}
+
+	*pfn_out = ret.value;
+	return 0;
+}
+
+void nacc_populate_ptp_sbi(unsigned long root_pgd_pa,
+			   unsigned long parent_slot_pa,
+			   unsigned long child_pfn)
 {
 	struct sbiret ret;
 
 	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_POPULATE_PTP,
-			ptep_pa, pteval, root_pgd_pa, 0, 0, 0);
+			root_pgd_pa, parent_slot_pa, child_pfn, 0, 0, 0);
 	if (ret.error) {
-		printk(KERN_ERR "[Linux]: nacc_populate_ptp_sbi failed: ptep_pa=%lx pteval=%lx root=%lx err=%ld val=%ld\n",
-		       ptep_pa, pteval, root_pgd_pa, ret.error,
-		       ret.value);
+		printk(KERN_ERR "[Linux]: exact PTP population failed: root=%lx parent_slot=%lx child_pfn=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, parent_slot_pa, child_pfn,
+		       ret.error, ret.value);
+		panic("NaCC exact Secure PTP population failed");
+	}
+}
+
+void nacc_cancel_ptp_sbi(unsigned long pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_CANCEL_PTP,
+			pfn, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: fresh PTP cancellation failed: pfn=%lx err=%ld val=%ld\n",
+		       pfn, ret.error, ret.value);
+		panic("NaCC fresh Secure PTP cancellation failed");
+	}
+}
+
+int nacc_unlink_ptp_sbi(unsigned long root_pgd_pa,
+			unsigned long parent_slot_pa,
+			unsigned long expected_child_pfn,
+			unsigned long *child_pfn_out)
+{
+	struct sbiret ret;
+
+	if (!child_pfn_out)
+		return -EINVAL;
+	*child_pfn_out = 0;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UNLINK_PTP,
+			root_pgd_pa, parent_slot_pa, expected_child_pfn,
+			0, 0, 0);
+	if (ret.error) {
+		if (ret.error == NACC_SBI_ENOSPC)
+			return -EAGAIN;
+		printk(KERN_ERR "[Linux]: exact PTP unlink failed: root=%lx parent_slot=%lx expected_child_pfn=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, parent_slot_pa, expected_child_pfn,
+		       ret.error, ret.value);
+		panic("NaCC exact Secure PTP unlink failed");
 	}
 
-	return ret.error;
+	*child_pfn_out = ret.value;
+	return 0;
+}
+
+void nacc_finish_ptp_release_sbi(unsigned long pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FINISH_PTP_RELEASE,
+			pfn, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: pending PTP finish failed: pfn=%lx err=%ld val=%ld\n",
+		       pfn, ret.error, ret.value);
+		panic("NaCC pending Secure PTP finish failed");
+	}
+}
+
+int nacc_detach_agent_slot_sbi(unsigned long root_pgd_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC,
+			SBI_EXT_NACC_RECLAIM_AGENT_REGION,
+			root_pgd_pa, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		if (ret.error == NACC_SBI_ENOSPC)
+			return -EAGAIN;
+		printk(KERN_ERR "[Linux]: fixed Agent-slot detach failed: root=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, ret.error, ret.value);
+		panic("NaCC fixed Agent-slot detach failed");
+	}
+
+	return 0;
+}
+
+void nacc_flush_and_drain_sbi(struct mm_struct *mm)
+{
+	struct sbiret ret;
+	unsigned long root_pgd_pa;
+
+	if (!mm || !nacc_mm_root_tagged(mm))
+		panic("NaCC gather drain requested for untagged mm");
+
+	root_pgd_pa = virt_to_phys(mm->pgd);
+	do {
+		ret = sbi_ecall(SBI_EXT_NACC,
+				SBI_EXT_NACC_FLUSH_AND_DRAIN,
+				root_pgd_pa, 0, 0, 0, 0, 0);
+		if (ret.error == SBI_ERR_ALREADY_AVAILABLE)
+			cpu_relax();
+	} while (ret.error == SBI_ERR_ALREADY_AVAILABLE);
+
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: Secure-PTP gather flush/drain failed: root=%lx err=%ld val=%ld\n",
+		       root_pgd_pa, ret.error, ret.value);
+		panic("NaCC Secure-PTP gather flush/drain failed");
+	}
 }
 
 void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr,
@@ -658,7 +781,7 @@ void nacc_retire_root_sbi(unsigned long pgd_pa)
 	if (ret.error) {
 		printk(KERN_ERR "[Linux]: nacc_retire_root_sbi failed: pgd_pa=%lx err=%ld val=%ld\n",
 		       pgd_pa, ret.error, ret.value);
-		return;
+		panic("NaCC ROOT_L0 retirement protocol failure");
 	}
 
 	nacc_profile_root_retire();

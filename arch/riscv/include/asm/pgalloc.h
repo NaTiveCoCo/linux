@@ -40,10 +40,10 @@ static inline void pmd_populate(struct mm_struct *mm,
 	unsigned long pfn = virt_to_pfn(page_address(pte));
 	pmd_t new_pmd = __pmd((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE);
 
-	if (mm && nacc_pfn_is_secure_ptp(virt_to_pfn(pmd)) &&
-	    nacc_use_secure_pt(mm)) {
-		nacc_populate_ptp_sbi(__pa(pmd), pmd_val(new_pmd),
-				      __pa(mm->pgd));
+	if (nacc_pfn_is_secure_ptp(pfn)) {
+		if (!mm)
+			panic("NaCC Secure PTP population without mm denied");
+		nacc_populate_ptp_sbi(__pa(mm->pgd), __pa(pmd), pfn);
 		return;
 	}
 
@@ -56,12 +56,10 @@ static inline void pud_populate(struct mm_struct *mm, pud_t *pud, pmd_t *pmd)
 	unsigned long pfn = virt_to_pfn(pmd);
 	pud_t new_pud = __pud((pfn << _PAGE_PFN_SHIFT) | _PAGE_TABLE);
 
-	if (mm && nacc_use_secure_pt(mm) &&
-	    (nacc_pfn_is_secure_ptp(virt_to_pfn(pud)) ||
-	     (nacc_mm_root_tagged(mm) &&
-	      virt_to_pfn(pud) == virt_to_pfn(mm->pgd)))) {
-		nacc_populate_ptp_sbi(__pa(pud), pud_val(new_pud),
-				      __pa(mm->pgd));
+	if (nacc_pfn_is_secure_ptp(pfn)) {
+		if (!mm)
+			panic("NaCC root PTP population without mm denied");
+		nacc_populate_ptp_sbi(__pa(mm->pgd), __pa(pud), pfn);
 		return;
 	}
 
@@ -230,26 +228,17 @@ static inline void pgd_free(struct mm_struct *mm, pgd_t *pgd)
 static inline void __pmd_free_tlb(struct mmu_gather *tlb, pmd_t *pmd,
 				  unsigned long addr)
 {
-	struct ptdesc *ptdesc;
-	if (nacc_mm_is_active(tlb->mm)) {
-		unsigned long new_pfn = virt_to_pfn(pmd);
+	struct ptdesc *ptdesc = virt_to_ptdesc(pmd);
+	unsigned long pfn = page_to_pfn(ptdesc_page(ptdesc));
 
-			nacc_debug("[__pmd_free_tlb]: pmd_page_nacc will be called.\n");
-			nacc_track_secure_ptp_pfn(new_pfn);
-			ptdesc = virt_to_ptdesc(pmd);
-			/* If ptdesc PFN is in NACC range, it's a pure NACC page — don't buddy free */
-			if (nacc_pfn_is_secure_ptp(page_to_pfn(ptdesc_page(ptdesc)))) {
-				nacc_reclaim_ptp_dtor(ptdesc, page_to_pfn(ptdesc_page(ptdesc)),
-						      1, "__pmd_free_tlb");
-			return;
-		}
-		pagetable_pmd_dtor(ptdesc);
-		riscv_tlb_remove_ptdesc(tlb, ptdesc);
-	} else {
-		ptdesc = virt_to_ptdesc(pmd);
-		pagetable_pmd_dtor(ptdesc);
-		riscv_tlb_remove_ptdesc(tlb, ptdesc);
+	if (nacc_pfn_is_secure_ptp(pfn)) {
+		nacc_reclaim_ptp_dtor(ptdesc, pfn, 1, "__pmd_free_tlb");
+		nacc_finish_ptp_release_sbi(pfn);
+		return;
 	}
+
+	pagetable_pmd_dtor(ptdesc);
+	riscv_tlb_remove_ptdesc(tlb, ptdesc);
 }
 
 #endif /* __PAGETABLE_PMD_FOLDED */
@@ -258,6 +247,13 @@ static inline void __pte_free_tlb(struct mmu_gather *tlb, pgtable_t pte,
 				  unsigned long addr)
 {
 	struct ptdesc *ptdesc = page_ptdesc(pte);
+	unsigned long pfn = page_to_pfn(ptdesc_page(ptdesc));
+
+	if (nacc_pfn_is_secure_ptp(pfn)) {
+		nacc_reclaim_ptp_dtor(ptdesc, pfn, 0, "__pte_free_tlb");
+		nacc_finish_ptp_release_sbi(pfn);
+		return;
+	}
 
 	pagetable_pte_dtor(ptdesc);
 	riscv_tlb_remove_ptdesc(tlb, ptdesc);

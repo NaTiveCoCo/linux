@@ -190,44 +190,71 @@ void mm_trace_rss_stat(struct mm_struct *mm, int member)
  * Note: this doesn't free the actual pages themselves. That
  * has been handled earlier when unmapping all the memory regions.
  */
+static void nacc_mark_secure_ptp_unlinked(struct mmu_gather *tlb,
+					 unsigned long addr,
+					 unsigned int child_level)
+{
+	if (child_level == 0)
+		tlb_flush_pmd_range(tlb, addr, PAGE_SIZE);
+	else
+		tlb_flush_pud_range(tlb, addr, PAGE_SIZE);
+	tlb->freed_tables = 1;
+}
+
+static void nacc_force_gather_drain(struct mmu_gather *tlb,
+				    unsigned long addr,
+				    unsigned int child_level)
+{
+	nacc_mark_secure_ptp_unlinked(tlb, addr, child_level);
+	tlb_flush_mmu_tlbonly(tlb);
+}
+
+static unsigned long nacc_unlink_ptp_with_retry(struct mmu_gather *tlb,
+						unsigned long parent_slot_pa,
+						unsigned long expected_child_pfn,
+						unsigned long addr,
+						unsigned int child_level)
+{
+	unsigned long child_pfn;
+	int ret;
+
+	ret = nacc_unlink_ptp_sbi(__pa(tlb->mm->pgd), parent_slot_pa,
+				  expected_child_pfn, &child_pfn);
+	if (ret == -EAGAIN) {
+		nacc_force_gather_drain(tlb, addr, child_level);
+		ret = nacc_unlink_ptp_sbi(__pa(tlb->mm->pgd),
+					  parent_slot_pa,
+					  expected_child_pfn, &child_pfn);
+	}
+	if (ret)
+		panic("NaCC Secure PTP pending set stayed full after gather drain");
+
+	return child_pfn;
+}
+
 static void free_pte_range(struct mmu_gather *tlb, pmd_t *pmd,
 			   unsigned long addr)
 {
 	pgtable_t token;
+	unsigned long entry_pfn = __page_val_to_pfn(pmd_val(*pmd));
+	unsigned long token_pfn;
 	unsigned long pgtables_before = mm_pgtables_bytes(tlb->mm);
-	if (nacc_mm_is_active(tlb->mm)) {
-		unsigned long token_pfn;
 
-		token = pmd_pgtable(*pmd);
-		token_pfn = page_to_pfn(token);
-		if (nacc_pfn_is_secure_ptp(virt_to_pfn(pmd)) &&
-		    nacc_use_secure_pt(tlb->mm))
-			nacc_update_pte_sbi(NACC_UPDATE_PTE_XCHG_ONE,
-					    __pa(pmd), 0, addr,
-					    __pa(tlb->mm->pgd), 0);
-		else
-			pmd_clear(pmd);
-		/* Publish the unlink before a full reclaim queue returns the child. */
-		if (nacc_pfn_is_secure_ptp(token_pfn))
-			smp_wmb();
-		nacc_debug("free_pte_range: pmd: %lx pmd val: %lx pmd val pfn: %lx\n",
-			   (unsigned long)pmd, pmd_val(*pmd),
-			   __page_val_to_pfn(pmd_val(*pmd)));
-
-		if (nacc_pfn_is_secure_ptp(token_pfn)) {
-			/* Pure NACC PTE page: only do dtor cleanup, skip buddy free */
-			nacc_reclaim_ptp_dtor(page_ptdesc(token),
-					      token_pfn, 0,
-					      "free_pte_range");
-			nacc_track_secure_ptp_pfn(token_pfn);
-		} else {
-			/* Old buddy page: normal buddy free */
-			pte_free_tlb(tlb, token, addr);
-		}
+	if (nacc_mm_root_tagged(tlb->mm) &&
+	    nacc_pfn_is_secure_ptp(entry_pfn)) {
+		token_pfn = nacc_unlink_ptp_with_retry(tlb, __pa(pmd),
+						       entry_pfn, addr, 0);
+		token = pfn_to_page(token_pfn);
+		nacc_debug("free_pte_range: exact unlink pmd=%px child_pfn=%lx\n",
+			   pmd, token_pfn);
+		pte_free_tlb(tlb, token, addr);
 	} else {
 		token = pmd_pgtable(*pmd);
 		pmd_clear(pmd);
 		pte_free_tlb(tlb, token, addr);
+		if (nacc_mm_is_active(tlb->mm))
+			nacc_debug("free_pte_range: cleared ordinary pmd=%px child_pfn=%lx\n",
+				   pmd, page_to_pfn(token));
 	}
 	mm_dec_nr_ptes(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
@@ -270,11 +297,23 @@ static inline void free_pmd_range(struct mmu_gather *tlb, pud_t *pud,
 		return;
 
 	pmd = pmd_offset(pud, start);
-	pud_clear(pud);
+	pgtables_before = mm_pgtables_bytes(tlb->mm);
+	if (nacc_mm_root_tagged(tlb->mm) &&
+	    nacc_pfn_is_secure_ptp(__page_val_to_pfn(pud_val(*pud)))) {
+		unsigned long child_pfn;
+		unsigned long expected_child_pfn =
+			__page_val_to_pfn(pud_val(*pud));
+
+		child_pfn = nacc_unlink_ptp_with_retry(tlb, __pa(pud),
+						       expected_child_pfn,
+						       start, 1);
+		pmd = (pmd_t *)pfn_to_virt(child_pfn);
+	} else {
+		pud_clear(pud);
+	}
     // if(current->thread.nacc_flag & NACC_RECLAIM) {
 	// 	printk(KERN_ERR "[Linux]: after pud_clear\n");
 	// }
-	pgtables_before = mm_pgtables_bytes(tlb->mm);
 	pmd_free_tlb(tlb, pmd, start);
 	mm_dec_nr_pmds(tlb->mm);
 	if (nacc_mm_is_active(tlb->mm)) {
@@ -2103,7 +2142,7 @@ void unmap_page_range(struct mmu_gather *tlb,
 	BUG_ON(addr >= end);
 	tlb_start_vma(tlb, vma);
 	pgd = pgd_offset(vma->vm_mm, addr);
-	hit_nacc_reclaim = !!(nacc_mm_is_active(vma->vm_mm) &&
+	hit_nacc_reclaim = !!(nacc_mm_root_tagged(vma->vm_mm) &&
 			       (vma->vm_flags & VM_NACC));
 	if (unlikely(current->thread.nacc_flag || nacc_mm_state(vma->vm_mm) ||
 		     (vma->vm_flags & VM_NACC))) {
@@ -2114,12 +2153,21 @@ void unmap_page_range(struct mmu_gather *tlb,
 			   addr, end, hit_nacc_reclaim);
 	}
 	if (hit_nacc_reclaim) {
+		int ret;
+
 		nacc_debug("  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
 			   vma->vm_start, vma->vm_end);
 		pgtbl_debug(virt_to_phys(tlb->mm->pgd));
-		sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_RECLAIM_AGENT_REGION,
-			  vma->vm_start, vma->vm_end, virt_to_phys(tlb->mm->pgd),
-			  0, 0, 0);
+		ret = nacc_detach_agent_slot_sbi(
+			virt_to_phys(tlb->mm->pgd));
+		if (ret == -EAGAIN) {
+			nacc_force_gather_drain(tlb, addr, 1);
+			ret = nacc_detach_agent_slot_sbi(
+				virt_to_phys(tlb->mm->pgd));
+		}
+		if (ret)
+			panic("NaCC Agent detach group stayed full after gather drain");
+		nacc_mark_secure_ptp_unlinked(tlb, addr, 1);
 	} else {
 		do {
 			next = pgd_addr_end(addr, end);

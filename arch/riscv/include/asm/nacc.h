@@ -5,17 +5,11 @@
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/sched.h>
-#define NACC_RECLAIM_LIST_SIZE 511
 
 struct mm_struct;
 struct page;
 struct ptdesc;
 struct vm_area_struct;
-
-struct nacc_reclaim_list {
-	unsigned long pfns[NACC_RECLAIM_LIST_SIZE];
-	unsigned long count;
-};
 
 #ifdef NACC_LOG_DEBUG
 #define nacc_debug(fmt, ...) printk(KERN_ERR fmt, ##__VA_ARGS__)
@@ -88,6 +82,12 @@ struct nacc_uaccess_string_read_desc {
 #define NACC_USER_VPN2_PROTECTED_END \
 	(NACC_USER_VPN2_PROTECTED_SLOTS * NACC_USER_VPN2_SLOT_SIZE)
 
+#define NACC_AGENT_VA_BASE		0x3ec0000000UL
+#define NACC_AGENT_VA_SLOT_SIZE		(1UL << 30)
+#define NACC_AGENT_VA_SLOT_END \
+	(NACC_AGENT_VA_BASE + NACC_AGENT_VA_SLOT_SIZE)
+#define NACC_AGENT_LINEAR_SIZE		0x20000000UL
+
 #define NACC_SEMANTIC_MAX_PFNS	16UL
 
 enum nacc_update_pte_op {
@@ -99,9 +99,6 @@ enum nacc_copy_user_highpage_result {
 	NACC_COPY_USER_HIGHPAGE_NOT_HANDLED = 0,
 	NACC_COPY_USER_HIGHPAGE_HANDLED = 1,
 };
-
-void add_to_reclaim_list(unsigned long pfn);
-void flush_reclaim_list(void);
 
 unsigned long nacc_mm_state(struct mm_struct *mm);
 void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask);
@@ -174,12 +171,6 @@ static inline bool nacc_mm_root_tagged(struct mm_struct *mm)
 	return !!(nacc_mm_state(mm) & NACC_MM_ROOT_TAGGED);
 }
 
-static inline void nacc_track_secure_ptp_pfn(unsigned long pfn)
-{
-	if (nacc_pfn_is_secure_ptp(pfn))
-		add_to_reclaim_list(pfn);
-}
-
 void nacc_invoke(void);
 void nacc_exec(void);
 void nacc_invoke_child(void);
@@ -214,12 +205,22 @@ static inline int nacc_adopt_vdso_text(struct vm_area_struct *vma)
 int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag);
+int nacc_request_ptp_sbi(unsigned long *pfn_out);
+void nacc_cancel_ptp_sbi(unsigned long pfn);
+int nacc_unlink_ptp_sbi(unsigned long root_pgd_pa,
+			unsigned long parent_slot_pa,
+			unsigned long expected_child_pfn,
+			unsigned long *child_pfn_out);
+void nacc_finish_ptp_release_sbi(unsigned long pfn);
+int nacc_detach_agent_slot_sbi(unsigned long root_pgd_pa);
+void nacc_flush_and_drain_sbi(struct mm_struct *mm);
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr, unsigned long start_va,
 		       unsigned long root_pgd_pa);
-int nacc_populate_ptp_sbi(unsigned long ptep_pa, unsigned long pteval,
-			  unsigned long root_pgd_pa);
+void nacc_populate_ptp_sbi(unsigned long root_pgd_pa,
+			   unsigned long parent_slot_pa,
+			   unsigned long child_pfn);
 void nacc_wrprotect_ptes_sbi(unsigned long ptep_pa, unsigned int nr,
 			     unsigned long start_va,
 			     unsigned long root_pgd_pa);
