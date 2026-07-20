@@ -5146,6 +5146,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 	struct folio *folio;
 	vm_fault_t ret = 0;
 	int nr_pages = 1;
+	bool nacc_fresh_zero_leaf;
 	bool nacc_private_leaf;
 	pte_t entry;
 
@@ -5154,6 +5155,14 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS;
 
 	nacc_private_leaf = nacc_should_install_private_leaf(vma, addr);
+	/*
+	 * NACC_MM_ACTIVE also covers pre-attach exec construction. Restrict
+	 * this post-attach hint to the initialized current mm; the Monitor
+	 * still validates ATTACHED as the authority.
+	 */
+	nacc_fresh_zero_leaf = nacc_private_leaf &&
+			       vma->vm_mm == current->mm &&
+			       nacc_thread_is_inited();
 
 	/*
 	 * Use pte_alloc() instead of pte_alloc_map(), so that OOM can
@@ -5239,7 +5248,7 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 		ret = VM_FAULT_SIGBUS;
 		goto release;
 	}
-	if (unlikely(nacc_private_leaf))
+	if (unlikely(nacc_private_leaf && !nacc_fresh_zero_leaf))
 		entry = pte_mknacc(entry);
 
 	folio_ref_add(folio, nr_pages - 1);
@@ -5250,7 +5259,13 @@ static vm_fault_t do_anonymous_page(struct vm_fault *vmf)
 setpte:
 	if (vmf_orig_pte_uffd_wp(vmf))
 		entry = pte_mkuffd_wp(entry);
-	set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
+	if (unlikely(nacc_fresh_zero_leaf)) {
+		page_table_check_ptes_set(vma->vm_mm, vmf->pte, entry, 1);
+		nacc_fresh_zero_leaf_sbi(__pa(vmf->pte), pte_val(entry), addr,
+					 __pa(vma->vm_mm->pgd));
+	} else {
+		set_ptes(vma->vm_mm, addr, vmf->pte, entry, nr_pages);
+	}
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr_pages);

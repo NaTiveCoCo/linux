@@ -539,6 +539,23 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		printk(KERN_ERR "[Linux]: nacc_set_ptes_sbi failed: ptep_pa=%lx pteval=%lx nr=%u start_va=%lx root=%lx err=%ld val=%ld\n",
 		       ptep_pa, pteval, nr, start_va, root_pgd_pa,
 		       ret.error, ret.value);
+		panic("NaCC secure SET_PTES protocol failure");
+	}
+}
+
+void nacc_fresh_zero_leaf_sbi(unsigned long ptep_pa, unsigned long pteval,
+			      unsigned long start_va,
+			      unsigned long root_pgd_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FRESH_ZERO_LEAF,
+			ptep_pa, pteval, start_va, root_pgd_pa, 0, 0);
+	if (ret.error) {
+		pr_err("[Linux]: fresh-zero leaf SBI failed: ptep_pa=%lx pteval=%lx start_va=%lx root=%lx err=%ld val=%ld\n",
+		       ptep_pa, pteval, start_va, root_pgd_pa, ret.error,
+		       ret.value);
+		panic("NaCC fresh-zero leaf transaction failed");
 	}
 }
 

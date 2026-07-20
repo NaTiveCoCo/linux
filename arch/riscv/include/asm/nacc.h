@@ -218,6 +218,9 @@ void nacc_flush_and_drain_sbi(struct mm_struct *mm);
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr, unsigned long start_va,
 		       unsigned long root_pgd_pa);
+void nacc_fresh_zero_leaf_sbi(unsigned long ptep_pa, unsigned long pteval,
+			      unsigned long start_va,
+			      unsigned long root_pgd_pa);
 void nacc_populate_ptp_sbi(unsigned long root_pgd_pa,
 			   unsigned long parent_slot_pa,
 			   unsigned long child_pfn);

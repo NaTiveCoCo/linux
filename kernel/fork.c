@@ -1727,6 +1727,11 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	if (!oldmm)
 		return 0;
 
+#ifdef NACC
+	if (nacc_mm_is_active(oldmm) && !(clone_flags & CLONE_VM))
+		return -EOPNOTSUPP;
+#endif
+
 	if (clone_flags & CLONE_VM) {
 		mmget(oldmm);
 		mm = oldmm;
