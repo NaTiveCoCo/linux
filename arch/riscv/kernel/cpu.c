@@ -13,13 +13,12 @@
 #include <asm/cpufeature.h>
 #include <asm/csr.h>
 #include <asm/hwcap.h>
+#include <asm/nacc.h>
 #include <asm/sbi.h>
 #include <asm/smp.h>
 #include <asm/pgtable.h>
 #include <asm/vendor_extensions.h>
 
-#define NACC_BASE_MAPPINGS 0x17ff00000
-#define NACC_MAPPINGS_SIZE 0x100000
 unsigned long nacc_mappings_virt = 0;
 EXPORT_SYMBOL(nacc_mappings_virt);
 bool arch_match_cpu_phys_id(int cpu, u64 phys_id)

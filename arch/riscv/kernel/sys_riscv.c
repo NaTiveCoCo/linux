@@ -22,9 +22,6 @@
 
 #include <asm/io.h>
 
-#define NACC_BASE_MAPPINGS 0x17ff00000
-#define NACC_MAPPINGS_SIZE 0x100000
-
 extern void nacc_delegate_entry(struct pt_regs *regs,
 				unsigned long kind,
 				unsigned long cause);
