@@ -218,6 +218,11 @@ void nacc_flush_and_drain_sbi(struct mm_struct *mm);
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 		       unsigned int nr, unsigned long start_va,
 		       unsigned long root_pgd_pa);
+void nacc_import_user_leaf_sbi(unsigned long ptep_pa,
+			       unsigned long source_pteval,
+			       unsigned long destination_pfn,
+			       unsigned long start_va,
+			       unsigned long root_pgd_pa);
 void nacc_fresh_zero_leaf_sbi(unsigned long ptep_pa, unsigned long pteval,
 			      unsigned long start_va,
 			      unsigned long root_pgd_pa);
@@ -236,6 +241,8 @@ int nacc_record_vvar_sbi(unsigned long root_pgd_pa, unsigned long addr,
 int nacc_adopt_vdso_sbi(unsigned long root_pgd_pa, unsigned long addr,
 			unsigned long nr_pages, unsigned long source_pfns_pa);
 int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid);
+int nacc_fork_window_check_sbi(void);
+int nacc_fork_select_child_root_sbi(unsigned long pgd_pa);
 void nacc_retire_root_sbi(unsigned long pgd_pa);
 int nacc_acquire_private_pfn_sbi(unsigned long pfn);
 int nacc_release_private_pfn_sbi(unsigned long pfn);
@@ -243,6 +250,18 @@ int nacc_retire_private_pfn_sbi(unsigned long pfn);
 bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 				    unsigned long vaddr,
 				    struct vm_area_struct *vma);
+void nacc_cow_replace_sbi(unsigned long ptep_pa,
+			  unsigned long expected_old_pte,
+			  unsigned long requested_pte,
+			  unsigned long vaddr,
+			  unsigned long root_pgd_pa,
+			  unsigned long destination_pfn);
+void nacc_fork_copy_install_sbi(unsigned long ptep_pa,
+				unsigned long expected_parent_pte,
+				unsigned long requested_child_pte,
+				unsigned long vaddr,
+				unsigned long child_root_pgd_pa,
+				unsigned long destination_pfn);
 bool nacc_uaccess_scope_begin(enum nacc_uaccess_scope_class scope_class,
 			      enum nacc_uaccess_scope_direction direction,
 			      unsigned long user_va,

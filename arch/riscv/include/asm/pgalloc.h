@@ -188,7 +188,10 @@ static inline pgd_t *pgd_alloc(struct mm_struct *mm)
 
 		if (mm && nacc_thread_has_root_l0_lifecycle()) {
 			cid = current->thread.nacc_cid;
-			if (!cid || nacc_tag_root_sbi(virt_to_phys(pgd), cid)) {
+			if (!cid ||
+			    (nacc_mm_is_active(mm) ?
+			     nacc_fork_select_child_root_sbi(virt_to_phys(pgd)) :
+			     nacc_tag_root_sbi(virt_to_phys(pgd), cid))) {
 				free_page((unsigned long)pgd);
 				return NULL;
 			}

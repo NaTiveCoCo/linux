@@ -543,6 +543,25 @@ void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
 	}
 }
 
+void nacc_import_user_leaf_sbi(unsigned long ptep_pa,
+			       unsigned long source_pteval,
+			       unsigned long destination_pfn,
+			       unsigned long start_va,
+			       unsigned long root_pgd_pa)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_SET_PTES, ptep_pa,
+			source_pteval, 1, start_va, root_pgd_pa,
+			destination_pfn);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc_import_user_leaf_sbi failed: ptep_pa=%lx source_pteval=%lx destination_pfn=%lx start_va=%lx root=%lx err=%ld val=%ld\n",
+		       ptep_pa, source_pteval, destination_pfn, start_va,
+		       root_pgd_pa, ret.error, ret.value);
+		panic("NaCC secure user leaf import protocol failure");
+	}
+}
+
 void nacc_fresh_zero_leaf_sbi(unsigned long ptep_pa, unsigned long pteval,
 			      unsigned long start_va,
 			      unsigned long root_pgd_pa)
@@ -785,6 +804,33 @@ int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)
 		return -EIO;
 	}
 
+	nacc_profile_root_tag();
+	return 0;
+}
+
+int nacc_fork_window_check_sbi(void)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK_WINDOW_CHECK,
+			0, 0, 0, 0, 0, 0);
+	return ret.error ? -EOPNOTSUPP : 0;
+}
+
+int nacc_fork_select_child_root_sbi(unsigned long pgd_pa)
+{
+	struct sbiret ret;
+
+	if (!pgd_pa)
+		return -EINVAL;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK_SELECT_CHILD,
+			pgd_pa, 0, 0, 0, 0, 0);
+	if (ret.error) {
+		nacc_debug("[Linux]: fork child root selection denied: pgd_pa=%lx err=%ld val=%ld\n",
+			   pgd_pa, ret.error, ret.value);
+		return -EIO;
+	}
 	nacc_profile_root_tag();
 	return 0;
 }

@@ -1728,7 +1728,8 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 		return 0;
 
 #ifdef NACC
-	if (nacc_mm_is_active(oldmm) && !(clone_flags & CLONE_VM))
+	if (nacc_mm_is_active(oldmm) && !(clone_flags & CLONE_VM) &&
+	    nacc_fork_window_check_sbi())
 		return -EOPNOTSUPP;
 #endif
 

@@ -576,6 +576,48 @@ bool nacc_copy_mc_user_highpage_sbi(struct page *to, struct page *from,
 }
 EXPORT_SYMBOL(nacc_copy_mc_user_highpage_sbi);
 
+void nacc_cow_replace_sbi(unsigned long ptep_pa,
+			  unsigned long expected_old_pte,
+			  unsigned long requested_pte,
+			  unsigned long vaddr,
+			  unsigned long root_pgd_pa,
+			  unsigned long destination_pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_COW_REPLACE,
+			ptep_pa, expected_old_pte, requested_pte, vaddr,
+			root_pgd_pa, destination_pfn);
+	if (ret.error) {
+		pr_err("[NACC][cow-replace] rejected ptep_pa=%lx old=%lx requested=%lx va=%lx root=%lx destination_pfn=%lx err=%ld\n",
+		       ptep_pa, expected_old_pte, requested_pte, vaddr,
+		       root_pgd_pa, destination_pfn, ret.error);
+		panic("NaCC COW_REPLACE failed");
+	}
+}
+EXPORT_SYMBOL(nacc_cow_replace_sbi);
+
+void nacc_fork_copy_install_sbi(unsigned long ptep_pa,
+				unsigned long expected_parent_pte,
+				unsigned long requested_child_pte,
+				unsigned long vaddr,
+				unsigned long child_root_pgd_pa,
+				unsigned long destination_pfn)
+{
+	struct sbiret ret;
+
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_FORK_COPY_INSTALL,
+			ptep_pa, expected_parent_pte, requested_child_pte,
+			vaddr, child_root_pgd_pa, destination_pfn);
+	if (ret.error) {
+		pr_err("[NACC][fork-copy-install] rejected ptep_pa=%lx parent=%lx requested=%lx va=%lx child_root=%lx destination_pfn=%lx err=%ld\n",
+		       ptep_pa, expected_parent_pte, requested_child_pte, vaddr,
+		       child_root_pgd_pa, destination_pfn, ret.error);
+		panic("NaCC FORK_COPY_INSTALL failed");
+	}
+}
+EXPORT_SYMBOL(nacc_fork_copy_install_sbi);
+
 struct nacc_leaf_detach_stats {
 	unsigned long vmas;
 	unsigned long private_hint_vmas;

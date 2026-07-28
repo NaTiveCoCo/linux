@@ -1032,6 +1032,7 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 {
 	struct folio *new_folio;
 	pte_t pte;
+	pte_t src_ptent;
 
 	new_folio = *prealloc;
 	if (!new_folio)
@@ -1042,6 +1043,30 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	 * over and copy the page & arm it.
 	 */
 
+	/* All done, just insert the new page copy in the child */
+	pte = mk_pte(&new_folio->page, dst_vma->vm_page_prot);
+	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
+	src_ptent = ptep_get(src_pte);
+	if (userfaultfd_pte_wp(dst_vma, src_ptent))
+		/* Uffd-wp needs to be delivered to dest pte as well */
+		pte = pte_mkuffd_wp(pte);
+	if (unlikely(pte_nacc(src_ptent)))
+		pte = pte_mknacc(pte);
+
+	if (unlikely(pte_nacc(src_ptent))) {
+		*prealloc = NULL;
+		__folio_mark_uptodate(new_folio);
+		folio_add_new_anon_rmap(new_folio, dst_vma, addr,
+					RMAP_EXCLUSIVE);
+		folio_add_lru_vma(new_folio, dst_vma);
+		rss[MM_ANONPAGES]++;
+		nacc_fork_copy_install_sbi(__pa(dst_pte), pte_val(src_ptent),
+					   pte_val(pte), addr, __pa(dst_vma->vm_mm->pgd),
+					   page_to_pfn(&new_folio->page));
+		kmsan_copy_page_meta(&new_folio->page, page);
+		return 0;
+	}
+
 	if (copy_mc_user_highpage(&new_folio->page, page, addr, src_vma))
 		return -EHWPOISON;
 
@@ -1050,15 +1075,6 @@ copy_present_page(struct vm_area_struct *dst_vma, struct vm_area_struct *src_vma
 	folio_add_new_anon_rmap(new_folio, dst_vma, addr, RMAP_EXCLUSIVE);
 	folio_add_lru_vma(new_folio, dst_vma);
 	rss[MM_ANONPAGES]++;
-
-	/* All done, just insert the new page copy in the child */
-	pte = mk_pte(&new_folio->page, dst_vma->vm_page_prot);
-	pte = maybe_mkwrite(pte_mkdirty(pte), dst_vma);
-	if (userfaultfd_pte_wp(dst_vma, ptep_get(src_pte)))
-		/* Uffd-wp needs to be delivered to dest pte as well */
-		pte = pte_mkuffd_wp(pte);
-	if (unlikely(pte_nacc(ptep_get(src_pte))))
-		pte = pte_mknacc(pte);
 	set_pte_at(dst_vma->vm_mm, addr, dst_pte, pte);
 	return 0;
 }
@@ -1689,6 +1705,36 @@ static bool nacc_should_install_private_leaf(struct vm_area_struct *vma,
 	 * cleared and the VMA is a zero-source anonymous mapping for NaCC.
 	 */
 	if (vma->vm_file && !vma_is_anonymous(vma))
+		return false;
+
+	return true;
+}
+
+static bool nacc_should_import_file_leaf(struct vm_area_struct *vma,
+					 unsigned long addr,
+					 bool is_cow,
+					 unsigned int nr_pages)
+{
+	if (!vma || !vma->vm_mm)
+		return false;
+	if (is_cow || nr_pages != 1)
+		return false;
+	if (!nacc_mm_is_active(vma->vm_mm))
+		return false;
+	if (!nacc_addr_in_protected_user_leaf_range(addr))
+		return false;
+	/*
+	 * VM_NACC_APP is intentionally an anonymous-private VMA marker.
+	 * File-backed private text/read-only leaves are not marked with it, but
+	 * an attached NaCC root must still import them into private PFNs instead
+	 * of publishing the raw page-cache PFN.
+	 */
+	if (vma->vm_flags & (VM_NACC | VM_PFNMAP | VM_MIXEDMAP |
+			     VM_SHARED | VM_MAYSHARE))
+		return false;
+	if (!vma->vm_file || vma_is_anonymous(vma))
+		return false;
+	if (!(vma->vm_flags & (VM_READ | VM_EXEC)))
 		return false;
 
 	return true;
@@ -3724,6 +3770,7 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 	vm_fault_t ret;
 	bool pfn_is_zero;
 	bool nacc_new_private;
+	bool nacc_monitor_cow;
 
 	delayacct_wpcopy_start();
 
@@ -3734,14 +3781,22 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		goto out;
 
 	pfn_is_zero = is_zero_pfn(pte_pfn(vmf->orig_pte));
-	nacc_new_private = nacc_should_install_private_leaf(vma, vmf->address) ||
+	nacc_monitor_cow = !pfn_is_zero && vmf->page &&
+			   pte_present(vmf->orig_pte) &&
+			   !pte_special(vmf->orig_pte) &&
+			   !pte_devmap(vmf->orig_pte) &&
+			   !(vma->vm_flags & (VM_SHARED | VM_MAYSHARE |
+					      VM_PFNMAP | VM_MIXEDMAP)) &&
+			   nacc_mm_is_active(mm);
+	nacc_new_private = nacc_monitor_cow ||
+			   nacc_should_install_private_leaf(vma, vmf->address) ||
 			   (pte_present(vmf->orig_pte) &&
 			    pte_nacc(vmf->orig_pte));
 	new_folio = folio_prealloc(mm, vma, vmf->address, pfn_is_zero);
 	if (!new_folio)
 		goto oom;
 
-	if (!pfn_is_zero) {
+	if (!pfn_is_zero && !nacc_monitor_cow) {
 		int err;
 
 		err = __wp_page_copy_user(&new_folio->page, vmf->page, vmf);
@@ -3799,18 +3854,37 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 		}
 		flush_cache_page(vma, vmf->address, pte_pfn(vmf->orig_pte));
 
-		/*
-		 * Clear the pte entry and flush it first, before updating the
-		 * pte with the new entry, to keep TLBs on different CPUs in
-		 * sync. This code used to set the new PTE then flush TLBs, but
-		 * that left a window where the new PTE could be loaded into
-		 * some TLBs while the old PTE remains in others.
-		*/
-		ptep_clear_flush(vma, vmf->address, vmf->pte);
-		folio_add_new_anon_rmap(new_folio, vma, vmf->address, RMAP_EXCLUSIVE);
-		folio_add_lru_vma(new_folio, vma);
-		BUG_ON(unshare && pte_write(entry));
-		set_pte_at(mm, vmf->address, vmf->pte, entry);
+		if (nacc_monitor_cow) {
+			/*
+			 * The Monitor derives the protected source from this exact
+			 * slot and owns copy, clear, local TLB invalidation, and
+			 * destination publication as one transaction.  Linux keeps
+			 * its normal metadata ordering around that commit point.
+			 */
+			folio_add_new_anon_rmap(new_folio, vma, vmf->address,
+						RMAP_EXCLUSIVE);
+			folio_add_lru_vma(new_folio, vma);
+			BUG_ON(unshare && pte_write(entry));
+			nacc_cow_replace_sbi(__pa(vmf->pte),
+					     pte_val(vmf->orig_pte), pte_val(entry),
+					     vmf->address & PAGE_MASK, __pa(mm->pgd),
+					     page_to_pfn(&new_folio->page));
+			kmsan_copy_page_meta(&new_folio->page, vmf->page);
+		} else {
+			/*
+			 * Clear the pte entry and flush it first, before updating the
+			 * pte with the new entry, to keep TLBs on different CPUs in
+			 * sync. This code used to set the new PTE then flush TLBs, but
+			 * that left a window where the new PTE could be loaded into
+			 * some TLBs while the old PTE remains in others.
+			 */
+			ptep_clear_flush(vma, vmf->address, vmf->pte);
+			folio_add_new_anon_rmap(new_folio, vma, vmf->address,
+						RMAP_EXCLUSIVE);
+			folio_add_lru_vma(new_folio, vma);
+			BUG_ON(unshare && pte_write(entry));
+			set_pte_at(mm, vmf->address, vmf->pte, entry);
+		}
 		update_mmu_cache_range(vmf, vma, vmf->address, vmf->pte, 1);
 		if (old_folio) {
 			/*
@@ -5444,8 +5518,9 @@ vm_fault_t do_set_pmd(struct vm_fault *vmf, struct page *page)
  * @nr: The number of PTEs to create.
  * @addr: The first address to create a PTE for.
  */
-void set_pte_range(struct vm_fault *vmf, struct folio *folio,
-		struct page *page, unsigned int nr, unsigned long addr)
+static int __set_pte_range(struct vm_fault *vmf, struct folio *folio,
+		struct page *page, unsigned int nr, unsigned long addr,
+		struct folio **nacc_import_folio, bool *nacc_imported)
 {
 	struct vm_area_struct *vma = vmf->vma;
 	bool write = vmf->flags & FAULT_FLAG_WRITE;
@@ -5464,6 +5539,25 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 		entry = maybe_mkwrite(pte_mkdirty(entry), vma);
 	if (unlikely(vmf_orig_pte_uffd_wp(vmf)))
 		entry = pte_mkuffd_wp(entry);
+
+	if (unlikely(nacc_import_folio && *nacc_import_folio)) {
+		struct folio *private_folio = *nacc_import_folio;
+
+		VM_BUG_ON_FOLIO(nr != 1, private_folio);
+		*nacc_import_folio = NULL;
+		__folio_mark_uptodate(private_folio);
+		folio_add_new_anon_rmap(private_folio, vma, addr,
+					RMAP_EXCLUSIVE);
+		folio_add_lru_vma(private_folio, vma);
+		nacc_import_user_leaf_sbi(__pa(vmf->pte), pte_val(entry),
+					  page_to_pfn(&private_folio->page),
+					  addr, __pa(vma->vm_mm->pgd));
+		if (nacc_imported)
+			*nacc_imported = true;
+		update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr);
+		return MM_ANONPAGES;
+	}
+
 	/* copy-on-write page */
 	if (write && !(vma->vm_flags & VM_SHARED)) {
 		VM_BUG_ON_FOLIO(nr != 1, folio);
@@ -5476,6 +5570,14 @@ void set_pte_range(struct vm_fault *vmf, struct folio *folio,
 
 	/* no need to invalidate: a not-present page won't be cached */
 	update_mmu_cache_range(vmf, vma, addr, vmf->pte, nr);
+	return write && !(vma->vm_flags & VM_SHARED) ? MM_ANONPAGES :
+						       mm_counter_file(folio);
+}
+
+void set_pte_range(struct vm_fault *vmf, struct folio *folio,
+		struct page *page, unsigned int nr, unsigned long addr)
+{
+	__set_pte_range(vmf, folio, page, nr, addr, NULL, NULL);
 }
 
 static bool vmf_pte_changed(struct vm_fault *vmf)
@@ -5506,9 +5608,11 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
 	struct vm_area_struct *vma = vmf->vma;
 	struct page *page;
 	struct folio *folio;
+	struct folio *nacc_import_folio = NULL;
 	vm_fault_t ret;
 	bool is_cow = (vmf->flags & FAULT_FLAG_WRITE) &&
 		      !(vma->vm_flags & VM_SHARED);
+	bool nacc_imported = false;
 	int type, nr_pages;
 	unsigned long addr = vmf->address;
 
@@ -5574,10 +5678,24 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
 		}
 	}
 
+	if (unlikely(nacc_should_import_file_leaf(vma, addr, is_cow,
+						  nr_pages))) {
+		ret = vmf_anon_prepare(vmf);
+		if (ret)
+			return ret;
+		nacc_import_folio = folio_prealloc(vma->vm_mm, vma, addr,
+						   false);
+		if (!nacc_import_folio)
+			return VM_FAULT_OOM;
+	}
+
 	vmf->pte = pte_offset_map_lock(vma->vm_mm, vmf->pmd,
 				       addr, &vmf->ptl);
-	if (!vmf->pte)
+	if (!vmf->pte) {
+		if (nacc_import_folio)
+			folio_put(nacc_import_folio);
 		return VM_FAULT_NOPAGE;
+	}
 
 	/* Re-check under ptl */
 	if (nr_pages == 1 && unlikely(vmf_pte_changed(vmf))) {
@@ -5591,13 +5709,17 @@ vm_fault_t finish_fault(struct vm_fault *vmf)
 	}
 
 	folio_ref_add(folio, nr_pages - 1);
-	set_pte_range(vmf, folio, page, nr_pages, addr);
-	type = is_cow ? MM_ANONPAGES : mm_counter_file(folio);
+	type = __set_pte_range(vmf, folio, page, nr_pages, addr,
+			       &nacc_import_folio, &nacc_imported);
 	add_mm_counter(vma->vm_mm, type, nr_pages);
+	if (unlikely(nacc_imported))
+		put_page(page);
 	ret = 0;
 
 unlock:
 	pte_unmap_unlock(vmf->pte, vmf->ptl);
+	if (nacc_import_folio)
+		folio_put(nacc_import_folio);
 	return ret;
 }
 
@@ -5696,6 +5818,10 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 /* Return true if we should do read fault-around, false otherwise */
 static inline bool should_fault_around(struct vm_fault *vmf)
 {
+	if (nacc_mm_is_active(vmf->vma->vm_mm) &&
+	    nacc_addr_in_protected_user_leaf_range(vmf->address))
+		return false;
+
 	/* No ->map_pages?  No way to fault around... */
 	if (!vmf->vma->vm_ops->map_pages)
 		return false;
