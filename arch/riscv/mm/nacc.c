@@ -19,8 +19,6 @@
 #include <asm/csr.h>
 #include <asm/tlbflush.h>
 
-extern unsigned long nacc_mappings_virt;
-
 #ifdef NACC_PROFILE
 enum nacc_profile_linux_counter {
 	NACC_PROFILE_LINUX_MM_ACTIVE_ENTER = 0,
@@ -405,39 +403,6 @@ static int __init nacc_lifecycle_debugfs_init(void)
 }
 late_initcall(nacc_lifecycle_debugfs_init);
 #endif /* NACC_PROFILE */
-
-static const char *nacc_ptp_level_name(unsigned int level)
-{
-       if (level == 1)
-               return "pmd";
-       if (level == 0)
-               return "pte";
-       return "invalid";
-}
-
-static void nacc_dump_ptdesc_state(const char *tag, unsigned long pfn,
-                                      unsigned int level, struct ptdesc *ptdesc)
-{
-       struct page *page = ptdesc_page(ptdesc);
-       int mapcount = atomic_read(&page->_mapcount);
-
-       mapcount = page_mapcount_is_type(mapcount) ? 0 : mapcount + 1;
-
-       nacc_debug("[Linux]: %s: pfn=%lx level=%u(%s) ptdesc=%px ptl=%px flags=%lx page_type=%x refcount=%d mapcount=%d\n",
-                  tag, pfn, level, nacc_ptp_level_name(level), ptdesc,
-                  ptlock_ptr(ptdesc), ptdesc->__page_flags,
-                  ptdesc->__page_type,
-                  atomic_read(&ptdesc->__page_refcount), mapcount);
-}
-
-static unsigned long *nacc_mapping_slot(unsigned long pfn)
-{
-       if (pfn < NACC_PTP_PFN_BASE || pfn >= NACC_PTP_PFN_END)
-               return NULL;
-
-       return (unsigned long *)(nacc_mappings_virt +
-                                ((pfn - NACC_PTP_PFN_BASE) << 4));
-}
 
 static unsigned long nacc_ptdesc_raw_ptl(struct ptdesc *ptdesc)
 {
@@ -1385,9 +1350,7 @@ void pgtbl_debug(unsigned long pgd)
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag)
 {
-	unsigned long *slot = nacc_mapping_slot(pfn);
 	unsigned long old_ptl = nacc_ptdesc_raw_ptl(ptdesc);
-	unsigned long old_slot = slot ? READ_ONCE(*slot) : 0;
 
 	if (level == 1)
 		pagetable_pmd_dtor(ptdesc);
@@ -1400,88 +1363,8 @@ void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 	 * observe the same zero state that the allocator would have provided.
 	 */
 	WRITE_ONCE(*(unsigned long *)&ptdesc->ptl, 0);
-	if (slot && old_slot == pfn)
-		WRITE_ONCE(*slot, 0);
-	nacc_debug("[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx old_slot=%lx new_slot=%lx\n",
+	nacc_debug("[Linux]: %s: reclaimed pfn=%lx level=%u old_ptl=%lx new_ptl=%lx\n",
 		   tag, pfn, level, old_ptl,
-		   nacc_ptdesc_raw_ptl(ptdesc), old_slot,
-		   slot ? READ_ONCE(*slot) : 0);
+		   nacc_ptdesc_raw_ptl(ptdesc));
 }
 EXPORT_SYMBOL(nacc_reclaim_ptp_dtor);
-
-static int __page_nacc_register_ptp(struct mm_struct *mm,
-				    unsigned long pfn, unsigned int level)
-{
-       unsigned long *slot;
-       struct ptdesc *ptdesc;
-       unsigned long pgtables_before = 0;
-
-       slot = nacc_mapping_slot(pfn);
-       if (!slot)
-               return -EINVAL;
-
-       if (*slot && *slot != pfn) {
-               printk(KERN_ERR "[Linux]: page_nacc_register_ptp: conflicting mapping pfn=%lx slot=%lx level=%u(%s)\n",
-                      pfn, *slot, level, nacc_ptp_level_name(level));
-               return -EINVAL;
-       }
-
-       if (*slot == pfn) {
-               ptdesc = page_ptdesc(pfn_to_page(pfn));
-               if (nacc_ptdesc_raw_ptl(ptdesc)) {
-               nacc_debug("[Linux]: page_nacc_register_ptp: pfn=%lx already registered as %s ptdesc=%px ptl=%lx\n",
-                          pfn, nacc_ptp_level_name(level),
-                          ptdesc, nacc_ptdesc_raw_ptl(ptdesc));
-                       return 0;
-               }
-
-               nacc_debug("[Linux]: page_nacc_register_ptp: recovering stale slot for pfn=%lx level=%u(%s)\n",
-                          pfn, level, nacc_ptp_level_name(level));
-               WRITE_ONCE(*slot, 0);
-       }
-
-       ptdesc = page_ptdesc(pfn_to_page(pfn));
-       nacc_dump_ptdesc_state("page_nacc_register_ptp: before ctor",
-                              pfn, level, ptdesc);
-       if (mm)
-	       pgtables_before = mm_pgtables_bytes(mm);
-
-       if (level == 1) {
-               if (!pagetable_pmd_ctor(ptdesc)) {
-                       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pagetable_pmd_ctor failed for pfn=%lx ptdesc=%px\n",
-                              pfn, ptdesc);
-                       return -ENOMEM;
-               }
-       } else if (level == 0) {
-               if (!pagetable_pte_ctor(ptdesc)) {
-                       printk(KERN_ERR "[Linux]: page_nacc_register_ptp: pagetable_pte_ctor failed for pfn=%lx ptdesc=%px\n",
-                              pfn, ptdesc);
-                       return -ENOMEM;
-               }
-       } else {
-               printk(KERN_ERR "[Linux]: page_nacc_register_ptp: invalid level=%u for pfn=%lx\n",
-                      level, pfn);
-               return -EINVAL;
-       }
-
-       if (mm) {
-	       if (level == 1)
-		       mm_inc_nr_pmds(mm);
-	       else
-		       mm_inc_nr_ptes(mm);
-	       nacc_debug("[Linux]: page_nacc_register_ptp: mm=%px pfn=%lx level=%u pgtables_bytes %lu -> %lu\n",
-			  mm, pfn, level, pgtables_before,
-			  mm_pgtables_bytes(mm));
-       }
-
-       *slot = pfn;
-       nacc_dump_ptdesc_state("page_nacc_register_ptp: after ctor",
-                              pfn, level, ptdesc);
-       return 0;
-}
-
-int page_nacc_register_ptp(unsigned long pfn, unsigned int level)
-{
-	return __page_nacc_register_ptp(NULL, pfn, level);
-}
-EXPORT_SYMBOL(page_nacc_register_ptp);

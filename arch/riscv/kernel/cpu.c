@@ -13,14 +13,11 @@
 #include <asm/cpufeature.h>
 #include <asm/csr.h>
 #include <asm/hwcap.h>
-#include <asm/nacc.h>
 #include <asm/sbi.h>
 #include <asm/smp.h>
 #include <asm/pgtable.h>
 #include <asm/vendor_extensions.h>
 
-unsigned long nacc_mappings_virt = 0;
-EXPORT_SYMBOL(nacc_mappings_virt);
 bool arch_match_cpu_phys_id(int cpu, u64 phys_id)
 {
 	return phys_id == cpuid_to_hartid_map(cpu);
@@ -236,22 +233,6 @@ static int __init riscv_cpuinfo_init(void)
 	return 0;
 }
 arch_initcall(riscv_cpuinfo_init);
-
-
-static int __init riscv_nacc_mappings_init(void)
-{
-    nacc_mappings_virt = (unsigned long) memremap(NACC_BASE_MAPPINGS, NACC_MAPPINGS_SIZE, MEMREMAP_WB);
-
-    if(!nacc_mappings_virt) {
-        pr_err("riscv_nacc_mappings_init: Failed to map NACC base mappings\n");
-        return -ENOMEM;
-    }
-
-    memset((void *) nacc_mappings_virt, 0, NACC_MAPPINGS_SIZE);
-    return 0;
-}
-
-arch_initcall(riscv_nacc_mappings_init);
 
 #ifdef CONFIG_PROC_FS
 

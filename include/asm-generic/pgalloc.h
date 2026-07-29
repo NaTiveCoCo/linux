@@ -93,11 +93,11 @@ static inline pgtable_t __pte_alloc_one_noprof(struct mm_struct *mm, gfp_t gfp)
 			return NULL;
 		nacc_debug("[__pte_alloc] admitted fresh PTE PTP pfn=%lx\n",
 			   new_pte_pfn);
-		if (page_nacc_register_ptp(new_pte_pfn, 0)) {
+		ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
+		if (!pagetable_pte_ctor(ptdesc)) {
 			nacc_cancel_ptp_sbi(new_pte_pfn);
 			return NULL;
 		}
-		ptdesc = page_ptdesc(pfn_to_page(new_pte_pfn));
 		return ptdesc_page(ptdesc);
 	}
 #endif
@@ -183,11 +183,11 @@ static inline pmd_t *pmd_alloc_one_noprof(struct mm_struct *mm, unsigned long ad
 				return NULL;
 			nacc_debug("[__pmd_alloc] admitted fresh PMD PTP pfn=%lx\n",
 				   new_pmd_pfn);
-			if (page_nacc_register_ptp(new_pmd_pfn, 1)) {
+			ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
+			if (!pagetable_pmd_ctor(ptdesc)) {
 				nacc_cancel_ptp_sbi(new_pmd_pfn);
 				return NULL;
 			}
-			ptdesc = page_ptdesc(pfn_to_page(new_pmd_pfn));
 			return ptdesc_address(ptdesc);
 		}
 	}

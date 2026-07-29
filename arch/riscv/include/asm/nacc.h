@@ -79,8 +79,6 @@ struct nacc_uaccess_string_read_desc {
 
 #define NACC_SHARED_POOL_PA_BASE	0x180000000UL
 #define NACC_SHARED_POOL_PA_SIZE	0x10000000UL
-#define NACC_BASE_MAPPINGS		NACC_SHARED_POOL_PA_BASE
-#define NACC_MAPPINGS_SIZE		0x100000UL
 
 #define NACC_USER_VPN2_PROTECTED_SLOTS 256UL
 #define NACC_USER_VPN2_SLOT_SIZE       (1UL << 30)
@@ -207,7 +205,6 @@ static inline int nacc_adopt_vdso_text(struct vm_area_struct *vma)
 }
 #endif
 
-int page_nacc_register_ptp(unsigned long pfn, unsigned int level);
 void nacc_reclaim_ptp_dtor(struct ptdesc *ptdesc, unsigned long pfn,
 			   unsigned int level, const char *tag);
 int nacc_request_ptp_sbi(unsigned long *pfn_out);
