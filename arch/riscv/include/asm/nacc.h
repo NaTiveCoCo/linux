@@ -108,30 +108,6 @@ void nacc_mm_set_state(struct mm_struct *mm, unsigned long mask);
 bool nacc_mm_is_active(struct mm_struct *mm);
 int nacc_detach_user_leaf_pages(struct mm_struct *mm, const char *tag);
 
-#ifdef NACC_PROFILE
-void nacc_profile_mm_active_enter(void);
-void nacc_profile_mm_active_exit(void);
-void nacc_profile_root_tag(void);
-void nacc_profile_root_retire(void);
-void nacc_profile_sys_register(void);
-void nacc_profile_fork_child_register(void);
-void nacc_profile_unregister_success(void);
-void nacc_profile_unregister_fail(void);
-void nacc_profile_secure_ptp_queue(unsigned long count);
-void nacc_profile_secure_ptp_flush(unsigned long count);
-#else
-static inline void nacc_profile_mm_active_enter(void) { }
-static inline void nacc_profile_mm_active_exit(void) { }
-static inline void nacc_profile_root_tag(void) { }
-static inline void nacc_profile_root_retire(void) { }
-static inline void nacc_profile_sys_register(void) { }
-static inline void nacc_profile_fork_child_register(void) { }
-static inline void nacc_profile_unregister_success(void) { }
-static inline void nacc_profile_unregister_fail(void) { }
-static inline void nacc_profile_secure_ptp_queue(unsigned long count) { }
-static inline void nacc_profile_secure_ptp_flush(unsigned long count) { }
-#endif
-
 static inline bool nacc_thread_is_inited(void)
 {
 	return !!(current->thread.nacc_flag & NACC_INITED);

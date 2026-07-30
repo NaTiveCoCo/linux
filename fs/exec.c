@@ -394,10 +394,8 @@ static int bprm_mm_init(struct linux_binprm *bprm)
 	    current->thread.nacc_flag == NACC_INITED ||
 	    current->thread.nacc_flag == NACC_FORKED ||
 	    current->thread.nacc_flag == NACC_EXEC) {
-		if (!nacc_mm_is_active(mm)) {
+		if (!nacc_mm_is_active(mm))
 			nacc_mm_set_state(mm, NACC_MM_ACTIVE);
-			nacc_profile_mm_active_enter();
-		}
 		nacc_debug("[Linux]: bprm_mm_init: mark new mm=%px as NACC_MM_ACTIVE for pid %d flag=%lx\n",
 			   mm, current->pid, current->thread.nacc_flag);
 	}

@@ -43,12 +43,11 @@ static void nacc_activate_current_mm(const char *tag)
 
     old_state = nacc_mm_state(current->mm);
 
-    if (!(old_state & NACC_MM_ACTIVE)) {
-        nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
-        nacc_profile_mm_active_enter();
-        nacc_debug("[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
-	           tag, current->mm, old_state, nacc_mm_state(current->mm));
-    }
+	if (!(old_state & NACC_MM_ACTIVE)) {
+		nacc_mm_set_state(current->mm, NACC_MM_ACTIVE);
+		nacc_debug("[Linux]: activate NaCC mm before SBI handoff (%s), mm=%px state %lx -> %lx\n",
+		           tag, current->mm, old_state, nacc_mm_state(current->mm));
+	}
 }
 
 static void nacc_fail_fork_child_attach(const char *reason, long err,
@@ -493,9 +492,8 @@ void nacc_register_forked_child_pid(unsigned long child_pid)
     nacc_debug("[Linux]: register fork child pid early, parent pid=%d child_pid=%lu cid=%lx\n",
                current->pid, child_pid, cid);
 
-    nacc_profile_fork_child_register();
-    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, child_pid,
-                    0, 0, 0, 0);
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, child_pid,
+			0, 0, 0, 0);
     if (ret.error) {
         printk(KERN_ERR "[Linux]: early fork child pid registration failed: parent pid=%d child_pid=%lu cid=%lx err=%ld val=%ld\n",
                current->pid, child_pid, cid, ret.error, ret.value);
@@ -507,21 +505,20 @@ void nacc_unregister_current_pid(void)
     unsigned long pid = task_pid_nr(current);
     struct sbiret ret;
 
-    if (!current->thread.nacc_cid || !pid)
-        return;
+	if (!current->thread.nacc_cid || !pid) {
+		return;
+	}
 
-    ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UNREGISTER, pid,
-                    0, 0, 0, 0, 0);
-    if (ret.error) {
-        nacc_profile_unregister_fail();
-        printk(KERN_ERR "[Linux]: nacc unregister failed: pid=%lu cid=%lx err=%ld val=%ld\n",
-               pid, current->thread.nacc_cid, ret.error, ret.value);
-        return;
-    }
+	ret = sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_UNREGISTER, pid,
+			0, 0, 0, 0, 0);
+	if (ret.error) {
+		printk(KERN_ERR "[Linux]: nacc unregister failed: pid=%lu cid=%lx err=%ld val=%ld\n",
+		       pid, current->thread.nacc_cid, ret.error, ret.value);
+		return;
+	}
 
-    nacc_profile_unregister_success();
-    nacc_debug("[Linux]: nacc unregister pid=%lu cid=%lx\n",
-               pid, current->thread.nacc_cid);
+	nacc_debug("[Linux]: nacc unregister pid=%lu cid=%lx\n",
+		   pid, current->thread.nacc_cid);
 }
 
 void nacc_set_ptes_sbi(unsigned long ptep_pa, unsigned long pteval,
@@ -801,7 +798,6 @@ int nacc_tag_root_sbi(unsigned long pgd_pa, unsigned long cid)
 		return -EIO;
 	}
 
-	nacc_profile_root_tag();
 	return 0;
 }
 
@@ -828,7 +824,6 @@ int nacc_fork_select_child_root_sbi(unsigned long pgd_pa)
 			   pgd_pa, ret.error, ret.value);
 		return -EIO;
 	}
-	nacc_profile_root_tag();
 	return 0;
 }
 
@@ -844,7 +839,6 @@ void nacc_retire_root_sbi(unsigned long pgd_pa)
 		panic("NaCC ROOT_L0 retirement protocol failure");
 	}
 
-	nacc_profile_root_retire();
 }
 
 int nacc_acquire_private_pfn_sbi(unsigned long pfn)
@@ -897,8 +891,7 @@ SYSCALL_DEFINE1(nacc_register, unsigned long, cid)
     pid = current->pid;
     nacc_debug("[Linux]: container id is %lx. \n", cid);
 
-    nacc_profile_sys_register();
-    sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, pid, 0, 0, 0, 0);
+	sbi_ecall(SBI_EXT_NACC, SBI_EXT_NACC_REGISTER, cid, pid, 0, 0, 0, 0);
 
     nacc_debug("[Linux]: GO BACK TO RUNC. \n");
 
