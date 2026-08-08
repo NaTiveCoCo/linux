@@ -166,32 +166,35 @@ int nacc_reserve_agent_slot_mm(struct mm_struct *mm, const char *tag)
 static int nacc_insert_agent_vma(unsigned long *virt_agent_out,
                                  const char *tag)
 {
-    unsigned long virt_agent;
-    unsigned long slot_end;
-    struct vm_area_struct *slot;
+	unsigned long virt_agent;
+	unsigned long slot_end;
+	struct vm_area_struct *slot;
+	bool slot_valid;
+	int ret;
 
-    virt_agent = nacc_fixed_agent_base();
-    slot_end = virt_agent + NACC_AGENT_VA_SLOT_SIZE;
-    if (!virt_agent || slot_end > TASK_SIZE)
-        return -EINVAL;
+	virt_agent = nacc_fixed_agent_base();
+	slot_end = virt_agent + NACC_AGENT_VA_SLOT_SIZE;
+	if (!virt_agent || slot_end > TASK_SIZE)
+		return -EINVAL;
 
-    slot = find_vma_intersection(current->mm, virt_agent, slot_end);
-    if (!slot) {
-        int ret = nacc_reserve_agent_slot_mm(current->mm, tag);
-        if (ret)
-            return ret;
-        slot = find_vma_intersection(current->mm, virt_agent, slot_end);
-    }
+	ret = nacc_reserve_agent_slot_mm(current->mm, tag);
+	if (ret)
+		return ret;
 
-    if (!slot || slot->vm_start != virt_agent || slot->vm_end != slot_end ||
-        !(slot->vm_flags & VM_NACC)) {
-        printk(KERN_ERR "[Linux]: fixed NACC agent slot missing or malformed (%s): expected [%lx, %lx)\n",
-               tag, virt_agent, slot_end);
-        return -ENOMEM;
-    }
+	mmap_read_lock(current->mm);
+	slot = find_vma_intersection(current->mm, virt_agent, slot_end);
+	slot_valid = slot && slot->vm_start == virt_agent &&
+		     slot->vm_end == slot_end && (slot->vm_flags & VM_NACC);
+	mmap_read_unlock(current->mm);
 
-    *virt_agent_out = virt_agent;
-    return 0;
+	if (!slot_valid) {
+		printk(KERN_ERR "[Linux]: fixed NACC agent slot missing or malformed (%s): expected [%lx, %lx)\n",
+		       tag, virt_agent, slot_end);
+		return -ENOMEM;
+	}
+
+	*virt_agent_out = virt_agent;
+	return 0;
 }
 
 static void __nacc_invoke_full(unsigned long sbi_fid, const char *tag)
@@ -680,7 +683,7 @@ int nacc_detach_agent_slot_sbi(unsigned long root_pgd_pa)
 			SBI_EXT_NACC_RECLAIM_AGENT_REGION,
 			root_pgd_pa, 0, 0, 0, 0, 0);
 	if (ret.error) {
-		if (ret.error == NACC_SBI_ENOSPC)
+		if (ret.error == SBI_ERR_ALREADY_AVAILABLE)
 			return -EAGAIN;
 		printk(KERN_ERR "[Linux]: fixed Agent-slot detach failed: root=%lx err=%ld val=%ld\n",
 		       root_pgd_pa, ret.error, ret.value);

@@ -418,7 +418,7 @@ static inline int pte_special(pte_t pte)
 	return pte_val(pte) & _PAGE_SPECIAL;
 }
 
-static inline int pte_nacc(pte_t pte)
+static inline bool pte_nacc(pte_t pte)
 {
 #ifdef CONFIG_64BIT
 	return pte_val(pte) & _PAGE_NACC;

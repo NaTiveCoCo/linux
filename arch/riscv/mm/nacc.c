@@ -572,6 +572,36 @@ static int nacc_private_data_fault_in_writeable(unsigned long user_va,
 	return left ? -EFAULT : 0;
 }
 
+static int nacc_private_data_fault_in_readable(unsigned long user_va,
+					       unsigned long bytes)
+{
+	unsigned long start = user_va;
+	unsigned long end;
+	struct mm_struct *mm = current->mm;
+	bool unlocked = false;
+	int ret = 0;
+
+	if (!mm)
+		return -EFAULT;
+	if (!bytes)
+		return 0;
+
+	end = PAGE_ALIGN(start + bytes);
+	if (end < start)
+		return -EFAULT;
+
+	mmap_read_lock(mm);
+	do {
+		ret = fixup_user_fault(mm, start, 0, &unlocked);
+		if (ret)
+			break;
+		start = (start + PAGE_SIZE) & PAGE_MASK;
+	} while (start != end);
+	mmap_read_unlock(mm);
+
+	return ret;
+}
+
 int nacc_private_data_put_user_write(unsigned long user_va,
 				     const void *value,
 				     unsigned long bytes)
@@ -751,6 +781,7 @@ int nacc_private_data_copy_from_user(unsigned long kernel_va,
 		unsigned long chunk = bytes - copied;
 		unsigned long page_left;
 		struct sbiret ret;
+		bool read_fault_retried = false;
 
 		page_left = PAGE_SIZE - (src & (PAGE_SIZE - 1));
 		if (chunk > page_left)
@@ -759,9 +790,32 @@ int nacc_private_data_copy_from_user(unsigned long kernel_va,
 		if (chunk > page_left)
 			chunk = page_left;
 
+	retry:
 		ret = sbi_ecall(SBI_EXT_NACC,
 				SBI_EXT_NACC_UACCESS_PRIVATE_COPY_FROM_USER,
 				src, dst, chunk, caller_pc, current->pid, 0);
+		if (ret.error == SBI_ERR_NOT_SUPPORTED &&
+		    !read_fault_retried) {
+			int fault_ret;
+
+			/*
+			 * A missing leaf can become private while normal uaccess
+			 * faults it in. Prefault first so M-mode can handle the retry.
+			 */
+			read_fault_retried = true;
+			fault_ret = nacc_private_data_fault_in_readable(src,
+								chunk);
+			if (!fault_ret)
+				goto retry;
+
+			printk_ratelimited(KERN_ERR "[NACC][private-copy-from-user-prefault-failed] pid=%d comm=%s cid=%lx kernel_va=%lx user_va=%lx bytes=%lu dst=%lx src=%lx chunk=%lu copied=%lu err=%d\n",
+					   current->pid, current->comm,
+					   current->thread.nacc_cid,
+					   kernel_va, user_va, bytes, dst, src,
+					   chunk, copied, fault_ret);
+			*left = bytes - copied;
+			return copied ? 1 : -EFAULT;
+		}
 		if (ret.error == SBI_ERR_NOT_SUPPORTED) {
 			if (!copied)
 				return 0;

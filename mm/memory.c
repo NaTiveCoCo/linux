@@ -2200,19 +2200,22 @@ void unmap_page_range(struct mmu_gather *tlb,
 	}
 	if (hit_nacc_reclaim) {
 		int ret;
+		unsigned int retries = 0;
 
 		nacc_debug("  VM_NACC is set for [%lx, %lx] region, we should reclaim it in the monitor. \n",
 			   vma->vm_start, vma->vm_end);
 		pgtbl_debug(virt_to_phys(tlb->mm->pgd));
-		ret = nacc_detach_agent_slot_sbi(
-			virt_to_phys(tlb->mm->pgd));
-		if (ret == -EAGAIN) {
-			nacc_force_gather_drain(tlb, addr, 1);
+		do {
 			ret = nacc_detach_agent_slot_sbi(
 				virt_to_phys(tlb->mm->pgd));
-		}
+			if (ret != -EAGAIN)
+				break;
+			if (retries++ == 16)
+				break;
+			nacc_force_gather_drain(tlb, addr, 1);
+		} while (1);
 		if (ret)
-			panic("NaCC Agent detach group stayed full after gather drain");
+			panic("NaCC Agent detach group stayed busy after gather drain retries");
 		nacc_mark_secure_ptp_unlinked(tlb, addr, 1);
 	} else {
 		do {
@@ -3869,6 +3872,12 @@ static vm_fault_t wp_page_copy(struct vm_fault *vmf)
 					     pte_val(vmf->orig_pte), pte_val(entry),
 					     vmf->address & PAGE_MASK, __pa(mm->pgd),
 					     page_to_pfn(&new_folio->page));
+			/*
+			 * The Monitor invalidates the local hart before publishing the
+			 * replacement.  Complete the shootdown for every CPU that may
+			 * retain this mm's old translation before userspace can resume.
+			 */
+			flush_tlb_page(vma, vmf->address);
 			kmsan_copy_page_meta(&new_folio->page, vmf->page);
 		} else {
 			/*
@@ -4123,7 +4132,20 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	const bool unshare = vmf->flags & FAULT_FLAG_UNSHARE;
 	struct vm_area_struct *vma = vmf->vma;
 	struct folio *folio = NULL;
+	bool nacc_force_cow_copy = false;
 	pte_t pte;
+
+#ifdef NACC
+	/*
+	 * A selected child cannot widen leaf permissions through generic
+	 * SET_PTES before its first-user-return attach. Force this write fault
+	 * through the exact COW_REPLACE transaction, even for an exclusive page.
+	 */
+	nacc_force_cow_copy = current->thread.nacc_flag == NACC_FORKED &&
+			      nacc_mm_is_active(vma->vm_mm) &&
+			      pte_present(vmf->orig_pte) &&
+			      pte_nacc(vmf->orig_pte);
+#endif
 
 	if (likely(!unshare)) {
 		if (userfaultfd_pte_wp(vma, ptep_get(vmf->pte))) {
@@ -4193,7 +4215,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 	 * If we encounter a page that is marked exclusive, we must reuse
 	 * the page without further checks.
 	 */
-	if (folio && folio_test_anon(folio) &&
+	if (!nacc_force_cow_copy && folio && folio_test_anon(folio) &&
 	    (PageAnonExclusive(vmf->page) || wp_can_reuse_anon_folio(folio, vma))) {
 		if (!PageAnonExclusive(vmf->page))
 			SetPageAnonExclusive(vmf->page);
